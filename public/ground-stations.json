@@ -1,0 +1,34 @@
+[
+  {
+    "id": "station_a",
+    "name": "Demo Station Alpha",
+    "lat": 25.3,
+    "lon": 51.5,
+    "minElevDeg": 5,
+    "antennas": [
+      { "id": "station_a_ant1", "name": "Demo Antenna A1", "type": "primary" },
+      { "id": "station_a_ant2", "name": "Demo Antenna A2", "type": "backup" }
+    ]
+  },
+  {
+    "id": "station_b",
+    "name": "Demo Station Beta",
+    "lat": 60.0,
+    "lon": 10.0,
+    "minElevDeg": 5,
+    "antennas": [
+      { "id": "station_b_ant1", "name": "Demo Antenna B1", "type": "primary" },
+      { "id": "station_b_ant2", "name": "Demo Antenna B2", "type": "backup" }
+    ]
+  },
+  {
+    "id": "station_c",
+    "name": "Demo Station Gamma",
+    "lat": -33.87,
+    "lon": 151.21,
+    "minElevDeg": 5,
+    "antennas": [
+      { "id": "station_c_ant1", "name": "Demo Antenna C1", "type": "primary" }
+    ]
+  }
+]

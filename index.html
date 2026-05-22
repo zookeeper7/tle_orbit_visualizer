@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TLE Visualizer</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+</head>
+<body>
+
+  <!-- ── Tab Bar ── -->
+  <div id="tabBar" class="tab-bar"></div>
+
+  <!-- ── Cesium 3D Globe (shared, visible only on Orbit Viewer tab) ── -->
+  <div id="cesiumContainer"></div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- TAB: Orbit Viewer (existing visualization)  -->
+  <!-- ════════════════════════════════════════════ -->
+  <div id="tab-orbit-viewer" class="tab-section">
+
+    <div id="controlPanel">
+      <div class="panel-header">
+        <h2>TLE Orbit Visualizer</h2>
+        <button id="togglePanel" title="Toggle Panel">&#9776;</button>
+      </div>
+
+      <div id="panelContent">
+        <div class="section ov-sat-section">
+          <div class="ov-section-toggle" data-ov-collapse="ovSatBody">
+            <label>Satellite Overlay Selector</label>
+            <button type="button" class="ov-collapse-btn" title="Toggle section">▾</button>
+          </div>
+          <div id="ovSatBody" class="ov-collapsible">
+            <div id="ovSatSelector" class="ov-sat-selector"></div>
+            <div class="ov-sat-actions">
+              <button id="visualizeBtn">Visualize All</button>
+              <div class="ov-sat-save-group">
+                <button id="ovSaveSelBtn" class="ov-save-btn" title="Save current selection as default">Save Default</button>
+                <button id="ovResetSelBtn" class="ov-reset-btn" title="Reset to saved default selection">Reset</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section ov-detail-section">
+          <div class="ov-section-toggle ov-detail-row" data-ov-collapse="ovTleBody">
+            <label for="tleInput">Focused Satellite TLE</label>
+            <span id="ovFocusedSatLabel" class="ov-focused-label">None selected</span>
+            <button id="ovTrackBtn" type="button" class="ov-track-btn" disabled title="Track focused satellite with camera">◎ Track</button>
+            <button type="button" class="ov-collapse-btn" title="Toggle section">▾</button>
+          </div>
+          <div id="ovTleBody" class="ov-collapsible">
+            <textarea id="tleInput" rows="4" spellcheck="false" placeholder="Click a satellite name above to inspect/edit its TLE"></textarea>
+            <div class="connection-section">
+              <div class="ov-conn-row">
+                <button id="connectionBtn" class="conn-btn" title="Check internet &amp; fetch latest TLE">
+                  <span id="connIndicator" class="conn-indicator"></span>
+                  <span id="connLabel">Check Connection</span>
+                </button>
+                <button id="fetchTleBtn" class="fetch-btn" disabled title="Fetch latest TLE from CelesTrak">
+                  Fetch Latest TLE
+                </button>
+              </div>
+              <div id="connStatus" class="conn-status" style="display:none;"></div>
+              <div class="ov-auto-refresh">
+                <button id="autoRefreshBtn" class="auto-refresh-btn" type="button" title="Toggle automatic TLE refresh for all satellites">
+                  <span id="autoRefreshIcon" class="auto-refresh-icon">↻</span>
+                  <span id="autoRefreshLabel">Auto Refresh: Off</span>
+                </button>
+                <select id="autoRefreshInterval" class="auto-refresh-interval" title="Refresh interval">
+                  <option value="1800">30 min</option>
+                  <option value="3600" selected>1 hour</option>
+                  <option value="7200">2 hours</option>
+                  <option value="21600">6 hours</option>
+                </select>
+                <span id="autoRefreshStatus" class="auto-refresh-status"></span>
+              </div>
+            </div>
+            <div class="ov-reftime">
+              <label class="ov-reftime-label">Reference Time (UTC)</label>
+              <div class="ov-reftime-row">
+                <input id="ovRefTimeInput" type="datetime-local" step="1" class="ov-reftime-input">
+                <button id="ovRefTimeNowBtn" class="ov-reftime-btn" type="button" title="Set to current time">NOW</button>
+                <button id="ovRefTimeApplyBtn" class="ov-reftime-btn ov-reftime-apply" type="button" title="Visualize at this time">Apply</button>
+              </div>
+              <div id="ovRefTimeHint" class="ov-reftime-hint">Leave NOW for live tracking</div>
+            </div>
+            <div class="settings" style="margin-top: 10px; margin-bottom: 12px;">
+              <div class="range-group">
+                <label>Past Orbits: <span id="pastVal">1</span> <span id="pastTime" class="time-hint"></span></label>
+                <input type="range" id="pastOrbits" min="0.5" max="16" step="0.5" value="1">
+              </div>
+              <div class="range-group">
+                <label>Future Orbits: <span id="futureVal">1.5</span> <span id="futureTime" class="time-hint"></span></label>
+                <input type="range" id="futureOrbits" min="0.5" max="16" step="0.5" value="1.5">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section ov-interactive-section">
+          <div class="ov-section-toggle ov-detail-row" data-ov-collapse="ovIntBody">
+            <label>Interactive Orbit</label>
+            <span id="ovIntStateLabel" class="ov-focused-label">Inactive</span>
+            <button type="button" class="ov-collapse-btn" title="Toggle section">▾</button>
+          </div>
+          <div id="ovIntBody" class="ov-collapsible is-hidden">
+            <div class="ov-int-hint">
+              Move the 6 classical orbital elements. Changes apply when you release the slider.
+              The satellite is saved as <strong>Interactive Keplerian</strong> in the satellite list.
+            </div>
+            <div class="ov-int-row">
+              <label for="ovIntASlider"><span class="ov-int-sym">a</span> Semi-major axis <span class="ov-int-unit">(km)</span></label>
+              <div class="ov-int-row-inputs">
+                <input type="range" id="ovIntASlider" min="6500" max="42500" step="1" value="6778">
+                <input type="number" id="ovIntAInput" step="any" min="6500" max="42500" value="6778" class="ov-int-num">
+              </div>
+            </div>
+            <div class="ov-int-row">
+              <label for="ovIntESlider"><span class="ov-int-sym">e</span> Eccentricity</label>
+              <div class="ov-int-row-inputs">
+                <input type="range" id="ovIntESlider" min="0" max="0.95" step="0.001" value="0.0001">
+                <input type="number" id="ovIntEInput" step="any" min="0" max="0.95" value="0.0001" class="ov-int-num">
+              </div>
+            </div>
+            <div class="ov-int-row">
+              <label for="ovIntISlider"><span class="ov-int-sym">i</span> Inclination <span class="ov-int-unit">(°)</span></label>
+              <div class="ov-int-row-inputs">
+                <input type="range" id="ovIntISlider" min="0" max="180" step="0.1" value="51.64">
+                <input type="number" id="ovIntIInput" step="any" min="0" max="180" value="51.64" class="ov-int-num">
+              </div>
+            </div>
+            <div class="ov-int-row">
+              <label for="ovIntRaanSlider"><span class="ov-int-sym">Ω</span> RAAN <span class="ov-int-unit">(°)</span></label>
+              <div class="ov-int-row-inputs">
+                <input type="range" id="ovIntRaanSlider" min="0" max="360" step="0.1" value="100">
+                <input type="number" id="ovIntRaanInput" step="any" min="0" max="360" value="100" class="ov-int-num">
+              </div>
+            </div>
+            <div class="ov-int-row">
+              <label for="ovIntArgpSlider"><span class="ov-int-sym">ω</span> Arg. of perigee <span class="ov-int-unit">(°)</span></label>
+              <div class="ov-int-row-inputs">
+                <input type="range" id="ovIntArgpSlider" min="0" max="360" step="0.1" value="0">
+                <input type="number" id="ovIntArgpInput" step="any" min="0" max="360" value="0" class="ov-int-num">
+              </div>
+            </div>
+            <div class="ov-int-row">
+              <label for="ovIntNuSlider"><span class="ov-int-sym">ν</span> True anomaly <span class="ov-int-unit">(°)</span></label>
+              <div class="ov-int-row-inputs">
+                <input type="range" id="ovIntNuSlider" min="0" max="360" step="0.1" value="0">
+                <input type="number" id="ovIntNuInput" step="any" min="0" max="360" value="0" class="ov-int-num">
+              </div>
+            </div>
+            <div class="ov-int-actions">
+              <button id="ovIntCreateBtn" type="button" class="ov-int-btn ov-int-btn-primary">Create / Update</button>
+              <button id="ovIntResetBtn" type="button" class="ov-int-btn">Reset</button>
+              <button id="ovIntRemoveBtn" type="button" class="ov-int-btn ov-int-btn-danger" disabled>Remove</button>
+            </div>
+            <div id="ovIntStatus" class="ov-int-status"></div>
+          </div>
+        </div>
+
+        <div id="errorMsg" class="error" style="display:none;"></div>
+
+        <div id="satelliteInfo" class="section info" style="display:none;">
+          <h3>Orbital Elements</h3>
+          <table id="infoTable"></table>
+        </div>
+
+        <div class="section gs-section">
+          <div class="gs-header">
+            <label>Ground Stations</label>
+            <button id="toggleGS" class="gs-toggle" title="Toggle ground stations">&#9662;</button>
+          </div>
+
+          <div id="gsBody">
+            <div id="gsList" class="gs-list">
+              <!-- dynamically populated -->
+            </div>
+
+            <div class="gs-form">
+              <div class="gs-form-row">
+                <button id="gsExportBtn" class="gs-export-btn" title="Download JSON">Export</button>
+                <button class="gs-config-link" onclick="document.querySelector('[data-tab=configuration]')?.click()">Manage in Configuration →</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pass Schedule Panel (Right) -->
+    <div id="schedulePanel">
+      <div class="sched-header">
+        <h2>Pass Schedule</h2>
+        <button id="toggleSchedule" class="sched-toggle" title="Toggle schedule panel">&#9776;</button>
+      </div>
+      <div id="scheduleContent">
+        <div class="sched-summary" id="schedSummary">
+          <span class="sched-count" id="schedCount">0</span> passes in window
+        </div>
+        <div class="sched-table-wrap">
+           <table id="schedTable">
+            <thead>
+              <tr>
+                <th>Satellite</th>
+                <th>Station</th>
+                <th>AOS</th>
+                <th>LOS</th>
+                <th>Duration</th>
+                <th>Max EL</th>
+              </tr>
+            </thead>
+            <tbody id="schedBody">
+              <!-- JS-populated -->
+            </tbody>
+          </table>
+          <div id="schedEmpty" class="sched-empty">
+            No passes found.<br>Click <em>Visualize Orbit</em> to compute.
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /tab-orbit-viewer -->
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- TAB: Schedule Manager                       -->
+  <!-- ════════════════════════════════════════════ -->
+  <div id="tab-schedule-manager" class="tab-section" style="display:none;">
+    <div class="sm-layout">
+      <aside class="sm-panel sm-controls">
+        <div class="sm-panel-header">
+          <h2>Schedule Manager</h2>
+          <p>Multi-satellite pass planning</p>
+        </div>
+
+        <section class="sm-block">
+          <h3>Satellites</h3>
+          <div id="smSatelliteSelector" class="sm-check-list"></div>
+          <div class="sm-default-actions">
+            <button id="smSaveDefaultBtn" class="sm-toolbar-btn" type="button" title="Save selected satellites as default">Save Default</button>
+          </div>
+        </section>
+
+        <section class="sm-block">
+          <h3>Time Window</h3>
+          <div class="sm-time-toolbar">
+            <div class="sm-time-nav" role="group" aria-label="Shift time window by one day">
+              <button id="smShiftPrevDayBtn" class="sm-time-nav-btn" type="button" title="Move window back by one day" aria-label="Move window back by one day">←</button>
+              <button class="sm-time-preset" type="button" data-sm-preset="today">Today</button>
+              <button class="sm-time-preset" type="button" data-sm-preset="tomorrow">Tomorrow</button>
+              <button class="sm-time-preset active" type="button" data-sm-preset="24h">Next 24h</button>
+              <button class="sm-time-preset" type="button" data-sm-preset="72h">Next 3d</button>
+              <button id="smShiftNextDayBtn" class="sm-time-nav-btn" type="button" title="Move window forward by one day" aria-label="Move window forward by one day">→</button>
+            </div>
+          </div>
+          <div class="sm-time-grid">
+            <div class="sm-time-card">
+              <div class="sm-time-card-head">
+                <span>Start</span>
+                <div class="sm-time-card-nav" role="group" aria-label="Shift start date by one day">
+                  <button id="smStartPrevDayBtn" class="sm-time-mini-btn" type="button" title="Move start back by one day" aria-label="Move start back by one day">←</button>
+                  <button id="smStartNextDayBtn" class="sm-time-mini-btn" type="button" title="Move start forward by one day" aria-label="Move start forward by one day">→</button>
+                </div>
+                <span class="sm-time-zone">UTC</span>
+              </div>
+              <div class="sm-time-fields">
+                <input id="smStartDateManual" class="sm-time-date" type="date" aria-label="Start date">
+                <div class="sm-time-segments" aria-label="Start time">
+                  <select id="smStartHour" class="sm-time-segment" aria-label="Start hour"></select>
+                  <span class="sm-time-sep">:</span>
+                  <select id="smStartMinute" class="sm-time-segment" aria-label="Start minute"></select>
+                </div>
+              </div>
+              <input id="smStartDate" type="datetime-local" hidden>
+            </div>
+            <div class="sm-time-card">
+              <div class="sm-time-card-head">
+                <span>End</span>
+                <div class="sm-time-card-nav" role="group" aria-label="Shift end date by one day">
+                  <button id="smEndPrevDayBtn" class="sm-time-mini-btn" type="button" title="Move end back by one day" aria-label="Move end back by one day">←</button>
+                  <button id="smEndNextDayBtn" class="sm-time-mini-btn" type="button" title="Move end forward by one day" aria-label="Move end forward by one day">→</button>
+                </div>
+                <span class="sm-time-zone">UTC</span>
+              </div>
+              <div class="sm-time-fields">
+                <input id="smEndDateManual" class="sm-time-date" type="date" aria-label="End date">
+                <div class="sm-time-segments" aria-label="End time">
+                  <select id="smEndHour" class="sm-time-segment" aria-label="End hour"></select>
+                  <span class="sm-time-sep">:</span>
+                  <select id="smEndMinute" class="sm-time-segment" aria-label="End minute"></select>
+                </div>
+              </div>
+              <input id="smEndDate" type="datetime-local" hidden>
+            </div>
+          </div>
+          <div id="smWindowMeta" class="sm-window-meta">
+            <span id="smWindowDuration" class="sm-window-duration">Window: 24h 0m</span>
+          <span id="smWindowHint" class="sm-window-hint">All inputs are UTC. Use presets, then fine-tune day / hour / minute.</span>
+          </div>
+          <button id="smComputeBtn" class="sm-compute-btn" type="button">▶ Compute Passes</button>
+        </section>
+
+        <section class="sm-block">
+          <div class="sm-mappings-section">
+            <div class="sm-section-header" id="smMappingToggle">
+              <span>Antenna Mappings</span>
+              <button class="sm-section-toggle" type="button">▾</button>
+            </div>
+            <div id="smMappingPanel" class="sm-mapping-panel">
+              <div id="smMappingTree" class="mapping-tree">
+                <!-- JS-rendered hierarchical tree -->
+              </div>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <section class="sm-panel sm-results">
+        <div class="sm-toolbar">
+          <div class="sm-toolbar-row">
+            <div class="sm-summary">
+              <span><strong id="smPassCount">0</strong> passes</span>
+              <span><strong id="smConflictCount">0</strong> conflicts</span>
+            </div>
+            <div class="sm-results-time-strip">
+              <button id="smResultsPrevDayBtn" class="sm-time-nav-btn" type="button" title="Move window back by one day">←</button>
+              <span id="smResultsWindowLabel" class="sm-results-window-label">—</span>
+              <button id="smResultsNextDayBtn" class="sm-time-nav-btn" type="button" title="Move window forward by one day">→</button>
+              <button id="smRecomputeBtn" class="sm-toolbar-btn sm-recompute-btn" type="button" title="Recompute passes">↻</button>
+            </div>
+            <div class="sm-view-toggle">
+              <button class="sm-view-btn active" data-view="table" title="Table view">&#9776; Table</button>
+              <button class="sm-view-btn" data-view="gantt" title="Gantt chart">&#9881; Gantt</button>
+            </div>
+            <div class="sm-toolbar-actions">
+              <button id="smExportCsvBtn" class="sm-toolbar-btn" type="button">Export CSV</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Table View ── -->
+        <div id="smTableView" class="sm-table-wrap">
+          <table id="smPassTable" class="sm-table">
+            <thead>
+              <tr>
+                <th data-sort="satellite">Satellite</th>
+                <th data-sort="station">Station</th>
+                <th data-sort="antenna">Antenna</th>
+                <th data-sort="aos">AOS (UTC)</th>
+                <th data-sort="los">LOS (UTC)</th>
+                <th data-sort="duration">Duration</th>
+                <th data-sort="maxEl">Max EL</th>
+                <th data-sort="status">Status</th>
+                <th data-sort="conflict">Conflict</th>
+              </tr>
+              <tr class="sm-filter-row">
+                <th><div class="sm-mcf" id="smColFilterSat"><button class="sm-mcf-btn">All</button><div class="sm-mcf-popup"></div></div></th>
+                <th><div class="sm-mcf" id="smColFilterStation"><button class="sm-mcf-btn">All</button><div class="sm-mcf-popup"></div></div></th>
+                <th><div class="sm-mcf" id="smColFilterAntenna"><button class="sm-mcf-btn">All</button><div class="sm-mcf-popup"></div></div></th>
+                <th></th>
+                <th></th>
+                <th></th>
+                <th><input id="smColFilterMinEl" class="sm-col-filter sm-col-filter-input" type="number" placeholder="Min °" step="1" min="0" max="90"></th>
+                <th><div class="sm-mcf" id="smColFilterStatus"><button class="sm-mcf-btn">All</button><div class="sm-mcf-popup"></div></div></th>
+                <th><div class="sm-mcf" id="smColFilterConflict"><button class="sm-mcf-btn">All</button><div class="sm-mcf-popup"></div></div></th>
+              </tr>
+            </thead>
+            <tbody id="smPassBody"></tbody>
+          </table>
+          <div id="smPassEmpty" class="sm-empty">
+            <p>Select satellites and set a time window, then</p>
+            <a href="#" id="smEmptyComputeLink" class="sm-empty-link">compute passes →</a>
+          </div>
+        </div>
+
+        <!-- ── Gantt View ── -->
+        <div id="smGanttView" class="sm-gantt-wrap" style="display:none;">
+          <div class="tl-gantt-toolbar">
+            <div class="tl-zoom-controls">
+              <button id="tlZoomIn" title="Zoom in">+</button>
+              <button id="tlZoomOut" title="Zoom out">−</button>
+              <button id="tlFitAll" title="Fit all">Fit</button>
+            </div>
+            <div class="tl-filter-bar">
+              <span class="tl-filter-label">Show:</span>
+              <button class="tl-filter-btn active" data-tl-filter="all">All</button>
+              <button class="tl-filter-btn" data-tl-filter="no-rejected">No Rejected</button>
+              <button class="tl-filter-btn" data-tl-filter="confirmed">Confirmed</button>
+              <button class="tl-filter-btn" data-tl-filter="selected+">Selected+</button>
+            </div>
+            <div class="tl-selection-info">
+              <span id="tlSelCount">0</span> selected
+            </div>
+          </div>
+          <div class="tl-container">
+            <div class="tl-station-col" id="tlStationCol"></div>
+            <div class="tl-canvas-wrap" id="tlCanvasWrap">
+              <div class="tl-time-header" id="tlTimeHeader"></div>
+              <div class="tl-rows" id="tlRows"></div>
+            </div>
+          </div>
+          <div class="tl-detail" id="tlDetail" style="display:none;"></div>
+        </div>
+
+        <!-- ── Bulk bar (both views) ── -->
+        <div id="smBulkBar" class="sm-bulk-bottom" style="display:none;">
+          <span id="smBulkCount" class="sm-bulk-count">0 selected</span>
+          <div class="sm-bulk-btns">
+            <button type="button" class="sm-bulk-btn sm-status-predicted" data-bulk-status="predicted">Predicted</button>
+            <button type="button" class="sm-bulk-btn sm-status-selected" data-bulk-status="selected">Selected</button>
+            <button type="button" class="sm-bulk-btn sm-status-confirmed" data-bulk-status="confirmed">Confirmed</button>
+            <button type="button" class="sm-bulk-btn sm-status-rejected" data-bulk-status="rejected">Rejected</button>
+          </div>
+          <button type="button" class="sm-bulk-btn sm-bulk-clear" id="smBulkClear">✕ Clear</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- TAB: Configuration                          -->
+  <!-- ════════════════════════════════════════════ -->
+  <div id="tab-configuration" class="tab-section" style="display:none;">
+    <div class="cfg-layout">
+
+      <!-- Left: Navigation -->
+      <nav class="cfg-nav sm-panel">
+        <div class="sm-panel-header">
+          <h2>Configuration</h2>
+          <p>System Settings</p>
+        </div>
+        <div class="cfg-nav-list">
+          <button class="cfg-nav-btn active" data-cfg-section="satellites">Satellites</button>
+          <button class="cfg-nav-btn" data-cfg-section="groups">Groups</button>
+          <button class="cfg-nav-btn" data-cfg-section="stations">Ground Stations</button>
+          <button class="cfg-nav-btn" data-cfg-section="antennas">Antennas &amp; Masks</button>
+          <button class="cfg-nav-btn" data-cfg-section="mappings">Antenna Mappings</button>
+        </div>
+      </nav>
+
+      <!-- Right: Content panels -->
+      <section class="cfg-content sm-panel">
+
+        <!-- ── Satellites Section ── -->
+        <div id="cfgSatellites" class="cfg-section">
+          <div class="cfg-section-header">
+            <h3>Satellite Management</h3>
+            <div class="cfg-section-actions">
+              <button id="cfgSatAddBtn" class="cfg-btn cfg-btn-accent" type="button">+ Add Satellite</button>
+              <button id="cfgSatFetchAllBtn" class="cfg-btn cfg-btn-green" type="button">Fetch All TLEs</button>
+            </div>
+          </div>
+
+          <!-- Add/Edit form (hidden by default) -->
+          <div id="cfgSatForm" class="cfg-form" style="display:none;">
+            <div class="cfg-form-title" id="cfgSatFormTitle">Add Satellite</div>
+
+            <!-- CelesTrak Search -->
+            <div id="cfgSatSearchWrap" class="cfg-search-wrap">
+              <div class="cfg-search-bar">
+                <input id="cfgSatSearchInput" type="text" class="cfg-input cfg-search-input" placeholder="Search CelesTrak by name or NORAD ID…">
+                <button id="cfgSatSearchBtn" class="cfg-btn cfg-btn-accent cfg-search-btn" type="button">Search</button>
+              </div>
+              <div id="cfgSatSearchStatus" class="cfg-search-status" style="display:none;"></div>
+              <div id="cfgSatSearchResults" class="cfg-search-results" style="display:none;"></div>
+            </div>
+
+            <!-- Separation Vector → TLE generator -->
+            <details id="cfgSepvecWrap" class="cfg-sepvec">
+              <summary>Generate TLE from Separation Vector</summary>
+              <div class="cfg-sepvec-body">
+                <div class="cfg-sepvec-hint">
+                  Provide the launch separation state in <strong>WGS84 ECEF</strong> frame.
+                  Position in meters, Earth-relative velocity in m/s, at the given UTC time.
+                </div>
+                <div class="cfg-form-grid">
+                  <label>
+                    <span>UTC Time of State</span>
+                    <input id="cfgSepvecUtc" type="datetime-local" step="1" class="cfg-input">
+                  </label>
+                </div>
+                <label class="cfg-form-full">
+                  <span>ECEF Position X, Y, Z (m)</span>
+                  <input id="cfgSepvecPos" type="text" class="cfg-input" placeholder="e.g.  -3155921.3, 5341908.7, 3055477.2">
+                </label>
+                <label class="cfg-form-full">
+                  <span>ECEF Velocity X, Y, Z (m/s) — Earth relative</span>
+                  <input id="cfgSepvecVel" type="text" class="cfg-input" placeholder="e.g.  -5772.13, -2105.46, 4193.27">
+                </label>
+                <div class="cfg-sepvec-actions">
+                  <button id="cfgSepvecGenBtn" class="cfg-btn cfg-btn-accent" type="button">Generate TLE</button>
+                  <span id="cfgSepvecStatus" class="cfg-sepvec-status"></span>
+                </div>
+                <div id="cfgSepvecResult" class="cfg-sepvec-result" style="display:none;"></div>
+              </div>
+            </details>
+
+            <!-- Classical Orbital Elements → TLE generator -->
+            <details id="cfgKepWrap" class="cfg-sepvec">
+              <summary>Generate TLE from Classical Orbital Elements</summary>
+              <div class="cfg-sepvec-body">
+                <div class="cfg-sepvec-hint">
+                  Enter the 6 classical Keplerian elements at the given UTC epoch.
+                  Angles in <strong>degrees</strong>, semi-major axis in <strong>km</strong>.
+                </div>
+                <div class="cfg-form-grid">
+                  <label>
+                    <span>Epoch UTC</span>
+                    <input id="cfgKepUtc" type="datetime-local" step="1" class="cfg-input">
+                  </label>
+                  <label>
+                    <span>a — Semi-major axis (km)</span>
+                    <input id="cfgKepA" type="number" step="any" class="cfg-input" placeholder="e.g. 6778.137">
+                  </label>
+                  <label>
+                    <span>e — Eccentricity (0–1)</span>
+                    <input id="cfgKepE" type="number" step="any" min="0" max="0.999" class="cfg-input" placeholder="e.g. 0.0001">
+                  </label>
+                  <label>
+                    <span>i — Inclination (°)</span>
+                    <input id="cfgKepI" type="number" step="any" class="cfg-input" placeholder="e.g. 51.6400">
+                  </label>
+                  <label>
+                    <span>Ω — RAAN (°)</span>
+                    <input id="cfgKepRaan" type="number" step="any" class="cfg-input" placeholder="e.g. 100.0000">
+                  </label>
+                  <label>
+                    <span>ω — Argument of perigee (°)</span>
+                    <input id="cfgKepArgp" type="number" step="any" class="cfg-input" placeholder="e.g. 90.0000">
+                  </label>
+                  <label>
+                    <span>ν — True anomaly (°)</span>
+                    <input id="cfgKepNu" type="number" step="any" class="cfg-input" placeholder="e.g. 0.0000">
+                  </label>
+                </div>
+                <div class="cfg-sepvec-actions">
+                  <button id="cfgKepGenBtn" class="cfg-btn cfg-btn-accent" type="button">Generate TLE</button>
+                  <span id="cfgKepStatus" class="cfg-sepvec-status"></span>
+                </div>
+                <div id="cfgKepResult" class="cfg-sepvec-result" style="display:none;"></div>
+              </div>
+            </details>
+
+            <div class="cfg-form-grid">
+              <label>
+                <span>ID (unique key)</span>
+                <input id="cfgSatId" type="text" class="cfg-input" placeholder="e.g. mysat_1">
+              </label>
+              <label>
+                <span>Name</span>
+                <input id="cfgSatName" type="text" class="cfg-input" placeholder="e.g. MySat-1">
+              </label>
+              <label>
+                <span>NORAD ID</span>
+                <input id="cfgSatNorad" type="number" class="cfg-input" placeholder="e.g. 25544">
+              </label>
+              <label>
+                <span>Group</span>
+                <select id="cfgSatGroup" class="cfg-input"></select>
+              </label>
+              <label>
+                <span>Color</span>
+                <div class="cfg-color-wrap">
+                  <input id="cfgSatColor" type="color" class="cfg-color-input" value="#7dd3fc">
+                  <span id="cfgSatColorHex" class="cfg-color-hex">#7dd3fc</span>
+                </div>
+              </label>
+              <label class="cfg-form-check">
+                <input id="cfgSatEnabled" type="checkbox" checked>
+                <span>Enabled</span>
+              </label>
+            </div>
+            <label class="cfg-form-full">
+              <span>TLE (3-line format)</span>
+              <textarea id="cfgSatTle" class="cfg-input cfg-tle-input" rows="3" spellcheck="false" placeholder="Line 0: Satellite name&#10;Line 1: 1 NNNNN...&#10;Line 2: 2 NNNNN..."></textarea>
+            </label>
+            <div class="cfg-form-actions">
+              <button id="cfgSatSaveBtn" class="cfg-btn cfg-btn-accent" type="button">Save</button>
+              <button id="cfgSatCancelBtn" class="cfg-btn" type="button">Cancel</button>
+            </div>
+          </div>
+
+          <div id="cfgSatList" class="cfg-card-list">
+            <!-- JS-rendered satellite cards -->
+          </div>
+        </div>
+
+        <!-- ── Groups Section ── -->
+        <div id="cfgGroups" class="cfg-section">
+          <div class="cfg-section-header">
+            <h3>Group Management</h3>
+            <button id="cfgGroupAddBtn" class="cfg-btn cfg-btn-accent" type="button">+ Add Group</button>
+          </div>
+
+          <div id="cfgGroupForm" class="cfg-form" style="display:none;">
+            <div class="cfg-form-title" id="cfgGroupFormTitle">Add Group</div>
+            <div class="cfg-form-grid">
+              <label>
+                <span>ID / Name</span>
+                <input id="cfgGroupName" class="cfg-input" type="text" placeholder="auto-derived from label if blank" autocomplete="off">
+              </label>
+              <label>
+                <span>Label</span>
+                <input id="cfgGroupLabel" class="cfg-input" type="text" placeholder="e.g. KOMPSAT" autocomplete="off">
+              </label>
+              <label>
+                <span>Color</span>
+                <div class="cfg-color-wrap">
+                  <input id="cfgGroupColor" class="cfg-color-input" type="color" value="#7dd3fc">
+                  <span id="cfgGroupColorHex" class="cfg-color-hex">#7dd3fc</span>
+                </div>
+              </label>
+              <label>
+                <span>Sort order</span>
+                <input id="cfgGroupSort" class="cfg-input" type="number" step="1" value="0">
+              </label>
+            </div>
+            <label class="cfg-form-check">
+              <input id="cfgGroupSchedulable" type="checkbox" checked>
+              <span>Schedulable &mdash; include this group&rsquo;s satellites in Schedule Manager and Orbit Viewer overlay selector</span>
+            </label>
+            <div class="cfg-form-actions">
+              <button id="cfgGroupSaveBtn" class="cfg-btn cfg-btn-accent" type="button">Save</button>
+              <button id="cfgGroupCancelBtn" class="cfg-btn" type="button">Cancel</button>
+            </div>
+          </div>
+
+          <div id="cfgGroupList" class="cfg-card-list">
+            <!-- JS-rendered group table -->
+          </div>
+        </div>
+
+        <!-- ── Ground Stations Section ── -->
+        <div id="cfgStations" class="cfg-section">
+          <div class="cfg-section-header">
+            <h3>Ground Station Management</h3>
+            <button id="cfgStationAddBtn" class="cfg-btn cfg-btn-accent" type="button">+ Add Station</button>
+          </div>
+
+          <div id="cfgStationForm" class="cfg-form" style="display:none;">
+            <div class="cfg-form-title" id="cfgStationFormTitle">Add Ground Station</div>
+            <div class="cfg-form-grid">
+              <label>
+                <span>Name</span>
+                <input id="cfgStationName" type="text" class="cfg-input" placeholder="e.g. Demo Station">
+              </label>
+              <label>
+                <span>Latitude</span>
+                <input id="cfgStationLat" type="number" step="any" class="cfg-input" placeholder="e.g. 36.35">
+              </label>
+              <label>
+                <span>Longitude</span>
+                <input id="cfgStationLon" type="number" step="any" class="cfg-input" placeholder="e.g. 127.38">
+              </label>
+              <label>
+                <span>Min Elevation (°)</span>
+                <input id="cfgStationElev" type="number" step="0.5" min="0" max="90" value="5" class="cfg-input">
+              </label>
+            </div>
+            <div class="cfg-form-actions">
+              <button id="cfgStationSaveBtn" class="cfg-btn cfg-btn-accent" type="button">Save</button>
+              <button id="cfgStationCancelBtn" class="cfg-btn" type="button">Cancel</button>
+            </div>
+          </div>
+
+          <div id="cfgStationList" class="cfg-card-list">
+            <!-- JS-rendered station cards -->
+          </div>
+        </div>
+
+        <!-- ── Antennas & Masks Section ── -->
+        <div id="cfgAntennas" class="cfg-section">
+          <div class="cfg-section-header">
+            <h3>Antennas &amp; Azimuth Masks</h3>
+            <p class="cfg-section-hint">Select a station to manage its antennas</p>
+          </div>
+
+          <div class="cfg-antenna-station-select">
+            <select id="cfgAntennaStationSel" class="cfg-input">
+              <option value="">Select station…</option>
+            </select>
+            <button id="cfgAntennaAddBtn" class="cfg-btn cfg-btn-accent" type="button" disabled>+ Add Antenna</button>
+          </div>
+
+          <div id="cfgAntennaForm" class="cfg-form" style="display:none;">
+            <div class="cfg-form-title" id="cfgAntennaFormTitle">Add Antenna</div>
+            <div class="cfg-form-grid">
+              <label>
+                <span>Name</span>
+                <input id="cfgAntennaName" type="text" class="cfg-input" placeholder="e.g. 13m S/X #1">
+              </label>
+              <label>
+                <span>Type</span>
+                <input id="cfgAntennaType" type="text" class="cfg-input" placeholder="e.g. primary">
+              </label>
+            </div>
+            <div class="cfg-form-actions">
+              <button id="cfgAntennaSaveBtn" class="cfg-btn cfg-btn-accent" type="button">Save</button>
+              <button id="cfgAntennaCancelBtn" class="cfg-btn" type="button">Cancel</button>
+            </div>
+          </div>
+
+          <div id="cfgAntennaList" class="cfg-card-list">
+            <!-- JS-rendered antenna cards with mask controls -->
+          </div>
+        </div>
+
+        <!-- ── Antenna-Satellite Mappings Section ── -->
+        <div id="cfgMappings" class="cfg-section">
+          <div class="cfg-section-header">
+            <h3>Antenna–Satellite Mappings</h3>
+            <p class="cfg-section-hint">Assign satellites to antennas for pass scheduling</p>
+          </div>
+          <div id="cfgMappingTree" class="mapping-tree">
+            <!-- JS-rendered hierarchical station → antenna → satellite tree -->
+          </div>
+        </div>
+
+      </section>
+    </div>
+  </div>
+
+  <!-- ── Custom Playback Bar (Orbit Viewer only) ── -->
+  <div id="playbackBar">
+    <div class="pb-controls">
+      <button id="pbReverse" class="pb-btn" title="Reverse playback">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="18,4 6,12 18,20"/></svg>
+      </button>
+      <button id="pbPlayPause" class="pb-btn pb-btn-main" title="Play / Pause">
+        <svg id="pbIconPlay" viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg>
+        <svg id="pbIconPause" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="display:none"><rect x="5" y="4" width="4" height="16"/><rect x="15" y="4" width="4" height="16"/></svg>
+      </button>
+      <button id="pbStepFwd" class="pb-btn" title="Step forward">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="4,4 14,12 4,20"/><rect x="16" y="4" width="3" height="16"/></svg>
+      </button>
+      <button id="pbNow" class="pb-btn pb-btn-now" title="Jump to current time">NOW</button>
+    </div>
+
+    <div class="pb-timeline">
+      <input type="range" id="pbScrubber" class="pb-scrubber" min="0" max="1000" value="0" step="0.1">
+      <div id="pbTicks" class="pb-ticks">
+        <!-- JS-generated time labels -->
+      </div>
+    </div>
+
+    <div class="pb-speeds">
+      <button class="pb-speed active" data-mult="1">1×</button>
+      <button class="pb-speed" data-mult="10">10×</button>
+      <button class="pb-speed" data-mult="60">60×</button>
+      <button class="pb-speed" data-mult="360">360×</button>
+    </div>
+
+    <div class="pb-time" id="pbTime">--:--:-- UTC</div>
+
+    <div class="pb-record">
+      <select id="pbRecFps" class="pb-rec-fps" title="Capture rate (frames per second)">
+        <option value="24">24 fps</option>
+        <option value="30" selected>30 fps</option>
+        <option value="60">60 fps</option>
+      </select>
+      <button id="pbRecBtn" class="pb-rec-btn" type="button" title="Start recording. The browser will ask which tab/window to capture — choose this tab to include the side panels and timeline.">
+        <span class="pb-rec-dot"></span>
+        <span id="pbRecLabel" class="pb-rec-label">REC</span>
+      </button>
+      <span id="pbRecStatus" class="pb-rec-status"></span>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

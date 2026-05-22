@@ -1,0 +1,32 @@
+{
+  "name": "tle-visualize",
+  "version": "1.0.0",
+  "description": "TLE Satellite Orbit 3D Visualizer",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "server": "node server.js",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "TLE",
+    "satellite",
+    "orbit",
+    "3D",
+    "CesiumJS"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "cesium": "^1.139.1",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "satellite.js": "^6.0.2",
+    "vite": "^8.0.0",
+    "vite-plugin-cesium": "^1.2.23"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.4"
+  }
+}
