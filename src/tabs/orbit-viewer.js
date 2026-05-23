@@ -1313,7 +1313,21 @@ export function initOrbitViewer(viewer) {
           }
         } else if (entities.length > 1) {
           stopCustomTracking();
-          viewer.zoomTo(entities, new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), currentAvgAltKm ? currentAvgAltKm * 8000 : 8_000_000));
+          // "Visualize All" with multiple satellites: zoomTo(entities, hpr)
+          // computes a union BoundingSphere whose center lands INSIDE the
+          // Earth for any globally-distributed LEO constellation — the
+          // ECEF position vectors of satellites on opposite sides of the
+          // globe partially cancel. The HeadingPitchRange `range` is then
+          // measured from that subterranean center, placing the camera at
+          // a nonsensical surface point. Cesium's upstream tracker has
+          // acknowledged this since 2015 (CesiumGS/cesium#2812).
+          //
+          // Instead, fly to Cesium's default home view (the same view the
+          // page opens with — Camera.DEFAULT_VIEW_RECTANGLE), which puts
+          // the whole globe on screen and every LEO orbit is visible.
+          // flyHome() is independent of the homeButton command override
+          // in main.js, so it always reaches the true default view.
+          viewer.camera.flyHome(1.5);
         }
         applySceneMode(viewer);
       }
