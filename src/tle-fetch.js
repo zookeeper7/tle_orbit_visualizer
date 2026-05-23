@@ -11,7 +11,16 @@
 const CELESTRAK_BASE = 'https://celestrak.org/NORAD/elements/gp.php';
 
 /**
- * Check internet connectivity by sending a lightweight HEAD request to CelesTrak.
+ * Check internet connectivity by hitting CelesTrak's GP endpoint.
+ *
+ * Uses GET, not HEAD: CelesTrak's CORS configuration responds to GET with
+ * the right Access-Control-Allow-* headers but does NOT include HEAD in
+ * Access-Control-Allow-Methods, so HEAD preflights are rejected from the
+ * browser even though the same URL with a GET works fine (and even
+ * though direct browser navigation to the URL works). The TLE payload
+ * for NORAD 25544 is ~140 bytes, so the bandwidth cost over HEAD is
+ * negligible. We discard the body — only response.ok matters here.
+ *
  * @returns {Promise<boolean>} true if CelesTrak is reachable
  */
 export async function checkConnection() {
@@ -20,7 +29,7 @@ export async function checkConnection() {
     const timeoutId = setTimeout(() => controller.abort(), 5000);
 
     const response = await fetch(`${CELESTRAK_BASE}?CATNR=25544&FORMAT=TLE`, {
-      method: 'HEAD',
+      method: 'GET',
       signal: controller.signal,
       cache: 'no-store',
     });
