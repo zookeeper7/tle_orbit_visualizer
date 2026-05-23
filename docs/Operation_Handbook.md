@@ -1017,20 +1017,20 @@ focused 위성의 다가오는 pass 목록 (지상국 별 AOS / LOS / Max Elevat
 | 항목 | 값 / 동작 |
 |---|---|
 | 기본 scene mode | **2D** (저전력 GPU 부담 최소화) |
-| `resolutionScale` (very-low-end, cores ≤ 2) | 0.75 (safety net) |
-| `resolutionScale` (그 외 모든 phone) | **1.0** (네이티브 해상도) |
-| `scene.msaaSamples` (low-end, cores ≤ 4) | **4** |
-| `scene.msaaSamples` (mid-range 이상) | **8** (driver max 초과 시 Cesium 이 자동 downgrade) |
+| `resolutionScale` (low-end, cores ≤ 4) | 0.75 |
+| `resolutionScale` (mid-range / high-end) | 1.0 (네이티브 해상도) |
+| `scene.msaaSamples` (low-end) | 2 |
+| `scene.msaaSamples` (mid-range 이상) | 4 |
 | `scene.msaaSamples` (Firefox) | 1 강제 (upstream MSAA artifact) |
-| Globe `maximumScreenSpaceError` | **1.5** (데스크탑 기본값 2 보다도 정밀) |
-| Globe `tileCacheSize` | **200** (SSE 1.5 working set 커버) |
+| Globe `maximumScreenSpaceError` | **2** |
+| Globe `tileCacheSize` | **100** |
 | Globe `preloadSiblings` / `preloadAncestors` | false / true |
 | Fog / atmosphere / sun / moon | 모두 off |
 | `requestRenderMode` | on, `maximumRenderTimeChange = 1/30` (재생 중 평균 ~30 FPS 캡) |
 | Ground-station coverage 원 outline | 2 px (데스크탑 3 px) |
 | WebGL `powerPreference` | `'low-power'` |
 
-`requestRenderMode` + 30 FPS 캡 덕분에 위 해상도/MSAA 를 올려도 실제 GPU 부담은 일시적입니다. 저사양 phone 에서 발열/배터리 문제가 생기면 `pickResolutionScale` 의 분기를 다시 0.75 로, `pickMsaaSamples` 의 low-end 분기를 2 로 한 단계씩 내릴 수 있습니다 (`src/mobile/cesium-config.js`).
+`requestRenderMode` + 30 FPS 캡 덕분에 위 해상도/MSAA 를 올려도 실제 GPU 부담은 일시적입니다. 저사양 phone 에서 발열/배터리 문제가 생기면 `pickResolutionScale` 의 low-end 분기를 0.5 로, `pickMsaaSamples` 의 low-end 분기를 1 로 한 단계 내릴 수 있습니다 (`src/mobile/cesium-config.js`).
 
 ### 15.5 알려진 동작 / 제한
 

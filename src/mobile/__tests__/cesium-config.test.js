@@ -11,14 +11,13 @@ describe('pickResolutionScale', () => {
     expect(pickResolutionScale({ hardwareConcurrency: 2, devicePixelRatio: 1 })).toBe(1.0);
   });
 
-  // Very-low-end safety net: DPR≥2 + ≤2 cores
-  it('very-low-end (2 cores, DPR 2) → 0.75', () => {
+  // Low-end mobile: DPR≥2 + ≤4 cores
+  it('low-end (2 cores, DPR 2) → 0.75', () => {
     expect(pickResolutionScale({ hardwareConcurrency: 2, devicePixelRatio: 2 })).toBe(0.75);
   });
 
-  // 4-core devices now render at native resolution
-  it('4 cores, DPR 3 → 1.0', () => {
-    expect(pickResolutionScale({ hardwareConcurrency: 4, devicePixelRatio: 3 })).toBe(1.0);
+  it('low-end (4 cores, DPR 3) → 0.75', () => {
+    expect(pickResolutionScale({ hardwareConcurrency: 4, devicePixelRatio: 3 })).toBe(0.75);
   });
 
   // Mid-range: >4 cores, DPR=2
@@ -36,7 +35,7 @@ describe('pickResolutionScale', () => {
   });
 
   // Defaults
-  it('missing hardwareConcurrency, DPR=2 → 1.0', () => {
+  it('missing hardwareConcurrency, DPR=2 → mid-range 1.0', () => {
     expect(pickResolutionScale({ devicePixelRatio: 2 })).toBe(1.0);
   });
 
@@ -50,20 +49,20 @@ describe('pickResolutionScale', () => {
 });
 
 describe('pickMsaaSamples', () => {
-  it('low-end (2 cores) → 4', () => {
-    expect(pickMsaaSamples({ hardwareConcurrency: 2 })).toBe(4);
+  it('low-end (2 cores) → 2', () => {
+    expect(pickMsaaSamples({ hardwareConcurrency: 2 })).toBe(2);
   });
 
-  it('mid-range (8 cores) → 8', () => {
-    expect(pickMsaaSamples({ hardwareConcurrency: 8 })).toBe(8);
+  it('mid-range (8 cores) → 4', () => {
+    expect(pickMsaaSamples({ hardwareConcurrency: 8 })).toBe(4);
   });
 
   it('Firefox UA forces 1 regardless of cores', () => {
     expect(pickMsaaSamples({ hardwareConcurrency: 8, userAgent: 'Mozilla/5.0 Firefox/120.0' })).toBe(1);
   });
 
-  it('no input → mid-range default (8)', () => {
-    expect(pickMsaaSamples()).toBe(8);
+  it('no input → mid-range default (4)', () => {
+    expect(pickMsaaSamples()).toBe(4);
   });
 });
 
