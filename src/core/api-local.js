@@ -147,42 +147,84 @@ function nextMappingId() {
 
 /**
  * For every satellite in localStorage whose id matches a PRESETS key,
- * replace the 14-char epoch portion of TLE line 1 (cols 18..31, 0-based)
- * with the freshly-generated epoch from the in-memory PRESETS object.
+ * realign its identity fields (noradId + the NORAD/intl-designator/epoch
+ * portions of the TLE) to whatever the in-memory PRESETS now declares.
  *
- * Rationale: a returning visitor's localStorage was seeded with a
- * placeholder TLE whose epoch was current at the time of their first
- * visit. Weeks later that epoch is stale enough that SGP4 produces NaN
- * samples for many positions and the orbit either flickers or fails to
- * propagate at all. PRESETS.tle is regenerated on every module load
- * (see presets.js), so the only thing we need to do is splice that
- * fresh epoch into the cached satellite records.
+ * Why this exists: an early build of the app shipped synthetic placeholder
+ * NORAD IDs (99001, 99002, …) which never resolved on CelesTrak — so
+ * "Fetch Latest TLE" 404'd for every preset. PRESETS was later corrected
+ * to real NORAD IDs, but a returning visitor's localStorage still holds
+ * the old placeholders. Same story for the epoch: a stale epoch sends
+ * SGP4 numerically unstable. We splice the corrected fields in on every
+ * page load so the demo self-heals without forcing the user to clear
+ * their storage.
  *
- * Only the epoch substring is touched — any user edit elsewhere in
- * line 1 (BSTAR, mean motion derivatives) and all of line 2 (mean
- * motion, inclination, RAAN, etc.) are preserved verbatim.
+ * What we touch (preserve user edits elsewhere):
+ *   - sat.noradId           ← preset.noradId
+ *   - tleLine1 cols 2..6    ← preset NORAD (5 chars)
+ *   - tleLine1 cols 9..16   ← preset international designator (8 chars)
+ *   - tleLine1 cols 18..31  ← fresh epoch (14 chars, regenerated each load)
+ *   - tleLine2 cols 2..6    ← preset NORAD (5 chars)
+ *
+ * Everything else (BSTAR, mean motion derivatives, inclination, RAAN,
+ * eccentricity, argument of perigee, mean anomaly, mean motion) is left
+ * exactly as the user has it — so editing line 2 manually still sticks.
  */
-function refreshPresetTleEpoch() {
+function refreshPresetIdentity() {
   const satellites = readRaw(K.satellites, []);
   if (!Array.isArray(satellites) || satellites.length === 0) return;
 
   let changed = false;
   for (const sat of satellites) {
-    if (!sat || !sat.id || typeof sat.tleLine1 !== 'string') continue;
+    if (!sat || !sat.id) continue;
     const preset = PRESETS[sat.id];
     if (!preset) continue;
 
+    // (a) noradId
+    if (preset.noradId && sat.noradId !== preset.noradId) {
+      sat.noradId = preset.noradId;
+      changed = true;
+    }
+
     const presetLines = preset.tle.split('\n').map((l) => l.trim());
     const presetLine1 = presetLines.length === 3 ? presetLines[1] : presetLines[0];
-    if (typeof presetLine1 !== 'string' || presetLine1.length < 32) continue;
+    const presetLine2 = presetLines.length === 3 ? presetLines[2] : presetLines[1];
 
-    const freshEpoch = presetLine1.substring(18, 32);
-    if (sat.tleLine1.length < 32) continue;
-    const currentEpoch = sat.tleLine1.substring(18, 32);
-    if (currentEpoch === freshEpoch) continue;
+    // (b) tleLine1 NORAD + intl + epoch
+    if (
+      typeof sat.tleLine1 === 'string' && sat.tleLine1.length >= 32
+      && typeof presetLine1 === 'string' && presetLine1.length >= 32
+    ) {
+      const merged = (
+        sat.tleLine1.substring(0, 2)
+        + presetLine1.substring(2, 7)         // NORAD (cols 2..6)
+        + sat.tleLine1.substring(7, 9)
+        + presetLine1.substring(9, 17)        // intl designator (cols 9..16)
+        + sat.tleLine1.substring(17, 18)
+        + presetLine1.substring(18, 32)       // epoch (cols 18..31)
+        + sat.tleLine1.substring(32)
+      );
+      if (merged !== sat.tleLine1) {
+        sat.tleLine1 = merged;
+        changed = true;
+      }
+    }
 
-    sat.tleLine1 = sat.tleLine1.substring(0, 18) + freshEpoch + sat.tleLine1.substring(32);
-    changed = true;
+    // (c) tleLine2 NORAD
+    if (
+      typeof sat.tleLine2 === 'string' && sat.tleLine2.length >= 7
+      && typeof presetLine2 === 'string' && presetLine2.length >= 7
+    ) {
+      const merged = (
+        sat.tleLine2.substring(0, 2)
+        + presetLine2.substring(2, 7)         // NORAD (cols 2..6)
+        + sat.tleLine2.substring(7)
+      );
+      if (merged !== sat.tleLine2) {
+        sat.tleLine2 = merged;
+        changed = true;
+      }
+    }
   }
 
   if (changed) writeRaw(K.satellites, satellites);
@@ -203,10 +245,12 @@ function ensureSeeded() {
   _seeded = true; // set first to short-circuit re-entry through read()/write()
 
   if (readRaw(K.seeded, null) === '1') {
-    // Already seeded on a previous visit. Just refresh the placeholder
-    // TLE epoch of every PRESET-derived satellite so they keep
-    // propagating cleanly even if the user hasn't visited in months.
-    refreshPresetTleEpoch();
+    // Already seeded on a previous visit. Realign the preset-derived
+    // satellites' identity fields (noradId + TLE NORAD/intl/epoch) so
+    // the demo self-heals after a source-code change without forcing
+    // the user to clear their storage. See refreshPresetIdentity() for
+    // exactly which fields are touched.
+    refreshPresetIdentity();
     return;
   }
 
