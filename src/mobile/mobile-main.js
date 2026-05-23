@@ -695,41 +695,50 @@ function setupSheet() {
   if (!handle || !sheet) return;
 
   const DRAG_THRESHOLD_PX = 5;
+  // Has to match --sheet-top-min in mobile.css (top-bar 48 px + 8 px gap).
+  const SHEET_TOP_MIN_PX = 56;
   let dragging = false;
   let startY = 0;
   let startTransform = 0;
   let moved = false;
   let activePointerId = null;
 
+  // Recompute the snap-point translateY values directly from the current
+  // viewport height instead of trying to parse them out of the CSS
+  // variables. getComputedStyle(document.documentElement) returns the
+  // raw `calc(100dvh - …px)` declaration on Chromium and some Safari
+  // versions, which the previous /-?\d+px/ regex matched against the
+  // wrong sub-expression — so startTransform always read as 0 (full)
+  // and the sheet refused to drag down from peek. Mirroring the CSS
+  // math in JS is loss-free and survives a viewport resize for free.
   function snapTranslateYs() {
-    const cs = getComputedStyle(document.documentElement);
-    const parsePx = (name) => {
-      const raw = cs.getPropertyValue(name).trim();
-      const m = raw.match(/(-?\d*\.?\d+)px/);
-      return m ? parseFloat(m[1]) : NaN;
-    };
-    // Index matches SHEET_STATES = ['sheet-peek','sheet-half','sheet-full']
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    // Keep these formulas in lockstep with the CSS in mobile.css.
+    //   --sheet-h-peek = 100dvh - 96px - var(--sheet-top-min)
+    //   --sheet-h-half = 60dvh        - var(--sheet-top-min)
+    //   --sheet-h-full = 0
     return [
-      parsePx('--sheet-h-peek'),
-      parsePx('--sheet-h-half'),
-      parsePx('--sheet-h-full'),
+      vh - 96 - SHEET_TOP_MIN_PX,           // sheet-peek
+      vh * 0.6 - SHEET_TOP_MIN_PX,          // sheet-half
+      0,                                    // sheet-full
     ];
   }
 
   function currentTranslateY() {
-    // Inline style wins during a drag; otherwise fall back to the
-    // computed transform matrix coming from the .sheet-* class.
+    // Inline style wins during a drag, since that's the value we just
+    // wrote on the previous pointermove tick.
     const inline = sheet.style.transform;
     const m = inline && inline.match(/translateY\((-?\d*\.?\d+)px\)/);
     if (m) return parseFloat(m[1]);
-    const cs = getComputedStyle(sheet);
-    if (cs.transform && cs.transform !== 'none') {
-      const mm = cs.transform.match(/matrix\(([^)]+)\)/);
-      if (mm) {
-        const parts = mm[1].split(',').map((s) => parseFloat(s.trim()));
-        if (Number.isFinite(parts[5])) return parts[5];
-      }
-    }
+    // Otherwise look up the value our active snap class encodes.
+    // Using snapTranslateYs() instead of parsing the computed
+    // transform matrix means we never have to worry about matrix() vs
+    // matrix3d() rendering, or about GPU layers collapsing the
+    // translate into a 3D matrix.
+    const snaps = snapTranslateYs();
+    if (sheet.classList.contains('sheet-peek')) return snaps[0];
+    if (sheet.classList.contains('sheet-half')) return snaps[1];
+    if (sheet.classList.contains('sheet-full')) return snaps[2];
     return 0;
   }
 
@@ -1075,21 +1084,20 @@ async function syncVisualization() {
       // Mobile-specific render options:
       //   drawGroundTrack: false  — skip the clampToGround dashed ground
       //     track (rarely useful on mobile camera tilt, and expensive).
-      //   labelScale: 0.55        — bump the satellite-name sprite up
-      //     from the desktop default 0.35. Mobile screens are physically
-      //     small but very high-DPR, and a 0.35 sprite ends up roughly
-      //     half the on-screen size it has on desktop — which is what
-      //     makes the labels look blurry on a phone. The texture itself
-      //     is still rasterized at 48 px, so the larger scale produces a
-      //     bigger sprite of the same crisp glyphs.
-      //   labelOutlineWidth: 7    — proportionally thicker outline so
-      //     the heavier glyph still reads against a busy globe.
+      //   labelScale: 0.4         — slightly above the desktop default
+      //     (0.35) so the on-canvas sprite stays roughly the same size
+      //     desktop has, while the 48 px texture itself stays crisp.
+      //     Per user feedback "글씨 크기는 좀 작아졌으면 좋겠어,
+      //     선명하기만 하면 돼" — keep glyphs sharp via the texture, not
+      //     by inflating the sprite scale.
+      //   labelOutlineWidth: 5    — matches the desktop default; the
+      //     thicker outline only made the smaller sprite look heavier.
       addSatelliteVisualization(
         viewer,
         sat.name,
         result.positions,
         result.info,
-        { drawGroundTrack: false, labelScale: 0.55, labelOutlineWidth: 7 },
+        { drawGroundTrack: false, labelScale: 0.4, labelOutlineWidth: 5 },
         sat.color,
       );
       if (!firstPositions) firstPositions = result.positions;
