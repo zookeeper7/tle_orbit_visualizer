@@ -34,7 +34,7 @@ import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import './mobile.css';
 
-import { patch } from '../core/app-store.js';
+import { patch, subscribe } from '../core/app-store.js';
 import {
   fetchSatellites,
   fetchStations,
@@ -43,9 +43,17 @@ import {
   fetchGroups,
   getSetting,
   putSetting,
+  updateSatellite,
 } from '../core/api.js';
 import { parseTLE, propagateOrbit } from '../orbit.js';
 import { computePasses } from '../pass-prediction.js';
+import { checkConnection, fetchLatestTLE } from '../tle-fetch.js';
+import {
+  pickConnDotState,
+  formatBatchLabel,
+  formatBatchPercent,
+  runWithConcurrency,
+} from './conn-tle-helpers.js';
 import {
   addSatelliteVisualization,
   clearVisualization,
@@ -101,11 +109,17 @@ async function bootstrap() {
   setupTopBar();
   setupSheet();
   setupPlayback();
+  setupConnAndTle();
   renderSatChips();
   renderFocusedCard(null);
   renderPasses([]);
   updatePlaybackUI();
   startClockDisplayLoop();
+
+  // Install the 'satellites' store subscriber AFTER the initial render
+  // pass — that way the subscriber doesn't re-fire during boot for the
+  // patches inside loadInitialData() (those have already painted the UI).
+  subscribeSatellitesSlice();
 
   // Restore last focused satellite (if any).
   try {
@@ -117,6 +131,412 @@ async function bootstrap() {
       }
     }
   } catch (_) { /* missing setting is fine */ }
+}
+
+/**
+ * Subscribe to the 'satellites' app-store slice. Whenever it changes
+ * (e.g. background CelesTrak refresh writes fresh TLE rows, or the
+ * user-triggered fetch UI updates them), rebuild satellitesList,
+ * re-render the chip list + focused TLE card, and re-run the orbit
+ * visualization for the focused satellite if its TLE actually changed.
+ *
+ * The diff is over the full TLE string (line0 + line1 + line2) so a
+ * no-op patch (same TLE) doesn't trigger any re-render. This is
+ * defence-in-depth — api-local.js already gates patch() behind
+ * `updated > 0`, but other call sites (single-satellite Fetch button,
+ * future Auto Refresh, third-party patches) might not.
+ */
+let lastSatTlesById = new Map();
+
+function snapshotSatTles() {
+  const next = new Map();
+  for (const s of satellitesList) next.set(s.id, s.tle || '');
+  return next;
+}
+
+function diffSatelliteTles(prev, next) {
+  const changed = new Set();
+  for (const [id, tle] of next) {
+    if (prev.get(id) !== tle) changed.add(id);
+  }
+  for (const id of prev.keys()) {
+    if (!next.has(id)) changed.add(id);
+  }
+  return Array.from(changed).sort();
+}
+
+function subscribeSatellitesSlice() {
+  lastSatTlesById = snapshotSatTles();
+  subscribe('satellites', (satRec) => {
+    const newList = rebuildSatellitesList(satRec);
+    // Re-attach the joined `tle` field so the diff has something to compare.
+    // satRec entries from api-local won't have `.tle` (they store split
+    // tleLine0/1/2); loadInitialData already builds `.tle`, but a fresh
+    // background-refresh patch comes from refreshPresetTlesFromCelesTrak
+    // which DOES set `.tle`. Normalise here defensively.
+    for (const s of newList) {
+      if (typeof s.tle !== 'string' || !s.tle) {
+        s.tle = [s.tleLine0, s.tleLine1, s.tleLine2].filter(Boolean).join('\n');
+      }
+    }
+    satellitesList = newList;
+    const nextMap = snapshotSatTles();
+    const changedIds = diffSatelliteTles(lastSatTlesById, nextMap);
+    lastSatTlesById = nextMap;
+    if (changedIds.length === 0) return;
+
+    // Repaint chip list (preserves selection + focus via existing module state)
+    renderSatChips();
+
+    // Update focused TLE card text if the focused satellite is in the changed set.
+    if (focusedSatId) {
+      const sat = satellitesList.find((s) => s.id === focusedSatId);
+      if (sat) renderFocusedCard(sat);
+    }
+
+    // Re-run SGP4 propagation + redraw for any currently-selected satellite
+    // whose TLE changed. syncVisualization re-runs the full set — cheap
+    // for the preset count (≤12 entries) and keeps the visualization
+    // consistent with the chip selection.
+    const anySelectedChanged = changedIds.some((id) => selectedSatIds.has(id));
+    if (anySelectedChanged) {
+      syncVisualization();
+    }
+
+    // Pass schedule is derived from the focused satellite's TLE — recompute
+    // it whenever the focused TLE changes.
+    if (focusedSatId && changedIds.includes(focusedSatId)) {
+      const sat = satellitesList.find((s) => s.id === focusedSatId);
+      if (sat) {
+        try { computeAndRenderPasses(parseTLE(sat.tle)); } catch (_) {}
+      }
+    }
+  });
+}
+
+// ─── Connection & TLE (top-bar dot, sheet section, batch fetch) ──────────
+
+/** Connection state machine: 'idle' | 'checking' | 'online' | 'offline'. */
+let connState = 'idle';
+/** When set, indicates an in-flight batch fetch (and serves as its abort handle). */
+let batchAbort = null;
+/** Per-satellite single-fetch lock so the same satellite isn't fetched twice in parallel. */
+const singleFetchInFlight = new Set();
+/** Auto-retry timer when offline (15s cadence; cleared on any state change). */
+let autoRetryTimer = null;
+/** Per-chip data-fetch attribute clear timers, keyed by satId. */
+const chipFetchTimers = new Map();
+const AUTO_RETRY_MS = 15_000;
+const CHIP_FETCH_CLEAR_MS_SUCCESS = 3000;
+const CHIP_FETCH_CLEAR_MS_ERROR = 5000;
+const FETCH_BATCH_CONCURRENCY = 3;
+
+function setConnState(next) {
+  if (connState === next) return;
+  connState = next;
+
+  // Top-bar dot
+  const dot = document.getElementById('mConnDot');
+  if (dot) dot.dataset.state = pickConnDotState(next);
+
+  // In-sheet inline indicator
+  const inline = document.getElementById('mConnInline');
+  if (inline) inline.dataset.state = next;
+
+  // Inline button label
+  const label = document.getElementById('mConnLabel');
+  if (label) {
+    label.textContent = next === 'checking' ? 'Checking…'
+      : next === 'online'  ? 'Connected'
+      : next === 'offline' ? 'Offline'
+      : 'Check Connection';
+  }
+
+  // Section-header pill (only shown for non-idle, non-online states)
+  const pill = document.getElementById('mConnPill');
+  if (pill) {
+    if (next === 'idle' || next === 'online') {
+      pill.hidden = true;
+      pill.textContent = '';
+      pill.removeAttribute('data-state');
+    } else {
+      pill.hidden = false;
+      pill.dataset.state = next;
+      pill.textContent = next === 'checking' ? 'Checking' : next === 'offline' ? 'Offline' : '';
+    }
+  }
+
+  // Fetch buttons: enabled only when online and not in a batch
+  const refreshBtn = document.getElementById('mRefreshFocusedBtn');
+  const fetchAllBtn = document.getElementById('mFetchAllBtn');
+  const enableFetch = next === 'online' && !batchAbort;
+  if (refreshBtn) refreshBtn.disabled = !enableFetch;
+  if (fetchAllBtn) fetchAllBtn.disabled = !enableFetch;
+
+  // Auto-retry scheduling
+  if (autoRetryTimer) { clearTimeout(autoRetryTimer); autoRetryTimer = null; }
+  if (next === 'offline') {
+    autoRetryTimer = setTimeout(() => { runConnectionCheck(/* silent */ true); }, AUTO_RETRY_MS);
+  }
+}
+
+function showMobileConnStatus(msg, type, { announce = true } = {}) {
+  const el = document.getElementById('mConnStatus');
+  if (el) {
+    el.className = `m-conn-status ${type || 'info'}`;
+    el.textContent = msg || '';
+    el.hidden = !msg;
+  }
+  if (announce) {
+    const live = document.getElementById('mSrLive');
+    if (live) {
+      // Switch role for error severity so AT interrupts (best-effort).
+      try { live.setAttribute('role', type === 'error' ? 'alert' : 'status'); } catch (_) {}
+      live.textContent = '';
+      // Forced reflow so the live region observes the mutation
+      // eslint-disable-next-line no-unused-expressions
+      void live.offsetWidth;
+      live.textContent = msg || '';
+    }
+  }
+}
+
+function setChipFetchState(satId, state) {
+  const chip = document.querySelector(`.m-chip[data-sat-id="${cssEscape(satId)}"]`);
+  if (chip) {
+    if (state) chip.dataset.fetch = state;
+    else chip.removeAttribute('data-fetch');
+  }
+  const prev = chipFetchTimers.get(satId);
+  if (prev) clearTimeout(prev);
+  if (state === 'success' || state === 'error') {
+    const delay = state === 'success' ? CHIP_FETCH_CLEAR_MS_SUCCESS : CHIP_FETCH_CLEAR_MS_ERROR;
+    const t = setTimeout(() => {
+      const ch = document.querySelector(`.m-chip[data-sat-id="${cssEscape(satId)}"]`);
+      if (ch) ch.removeAttribute('data-fetch');
+      chipFetchTimers.delete(satId);
+    }, delay);
+    chipFetchTimers.set(satId, t);
+  } else {
+    chipFetchTimers.delete(satId);
+  }
+}
+
+/**
+ * CSS.escape polyfill for older browsers (mobile Safari < 14).
+ * Satellite ids are alphanumeric in PRESETS so escape is a no-op in
+ * practice, but defensive code costs nothing.
+ */
+function cssEscape(s) {
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(String(s));
+  return String(s).replace(/[^a-zA-Z0-9_-]/g, (c) => `\\${c.codePointAt(0).toString(16)} `);
+}
+
+async function runConnectionCheck(silent = false) {
+  setConnState('checking');
+  if (!silent) showMobileConnStatus('Checking internet connection…', 'info');
+  const online = await checkConnection();
+  setConnState(online ? 'online' : 'offline');
+  if (online) {
+    if (!silent) showMobileConnStatus('Online — CelesTrak reachable', 'success');
+  } else {
+    showMobileConnStatus('Cannot reach CelesTrak — check your internet', 'error');
+  }
+  return online;
+}
+
+/**
+ * Split a 3-line TLE response into {line0, line1, line2}, identifying
+ * the lines by their leading "1 " / "2 " markers (same logic the
+ * desktop fetchTleBtn handler uses). Returns null if the response is
+ * malformed.
+ */
+function parseFetchedTle(tleText) {
+  if (typeof tleText !== 'string') return null;
+  const lines = tleText.split('\n').map((l) => l.trim()).filter(Boolean);
+  const line1 = lines.find((l) => l.startsWith('1 ')) || '';
+  const line2 = lines.find((l) => l.startsWith('2 ')) || '';
+  if (!line1 || !line2) return null;
+  const line0 = (lines[0] && lines[0] !== line1 && lines[0] !== line2) ? lines[0] : '';
+  return { line0, line1, line2 };
+}
+
+/**
+ * Persist a freshly-fetched TLE for one satellite — writes to the API
+ * (server DB or localStorage adapter), then patches the in-memory store
+ * so the 'satellites' subscriber (subscribeSatellitesSlice) re-renders
+ * the chip / focused card / orbit visualization automatically.
+ */
+async function persistFetchedTle(sat, parsed) {
+  await updateSatellite(sat.id, {
+    id: sat.id,
+    name: sat.name,
+    noradId: Number.isFinite(Number(sat.noradId)) ? Number(sat.noradId) : null,
+    groupName: sat.groupName || sat.group || '',
+    color: sat.color || '#7dd3fc',
+    enabled: sat.enabled !== false,
+    tleLine0: parsed.line0,
+    tleLine1: parsed.line1,
+    tleLine2: parsed.line2,
+  });
+  patch('satellites', (current) => {
+    if (current[sat.id]) {
+      current[sat.id] = {
+        ...current[sat.id],
+        tleLine0: parsed.line0,
+        tleLine1: parsed.line1,
+        tleLine2: parsed.line2,
+        tle: [parsed.line0, parsed.line1, parsed.line2].filter(Boolean).join('\n'),
+      };
+    }
+    return current;
+  });
+}
+
+async function handleRefreshFocused() {
+  if (connState !== 'online') {
+    showMobileConnStatus('Run "Check Connection" first.', 'error');
+    return;
+  }
+  if (!focusedSatId) {
+    showMobileConnStatus('Tap a satellite chip to focus it, then refresh.', 'error');
+    return;
+  }
+  const sat = satellitesList.find((s) => s.id === focusedSatId);
+  if (!sat || !Number.isFinite(Number(sat.noradId))) {
+    showMobileConnStatus(`${sat?.name || 'Satellite'} has no NORAD ID.`, 'error');
+    return;
+  }
+  if (singleFetchInFlight.has(sat.id)) return; // dedupe
+  singleFetchInFlight.add(sat.id);
+  setChipFetchState(sat.id, 'pending');
+  showMobileConnStatus(`Fetching latest TLE for ${sat.name}…`, 'info');
+  try {
+    const tle = await fetchLatestTLE(Number(sat.noradId));
+    const parsed = parseFetchedTle(tle);
+    if (!parsed) throw new Error('Malformed TLE response');
+    await persistFetchedTle(sat, parsed);
+    setChipFetchState(sat.id, 'success');
+    showMobileConnStatus(`Latest TLE loaded for ${sat.name}`, 'success');
+  } catch (err) {
+    setChipFetchState(sat.id, 'error');
+    showMobileConnStatus(`Refresh failed for ${sat.name}: ${err?.message || err}`, 'error');
+  } finally {
+    singleFetchInFlight.delete(sat.id);
+  }
+}
+
+async function handleFetchAll() {
+  if (connState !== 'online') {
+    showMobileConnStatus('Run "Check Connection" first.', 'error');
+    return;
+  }
+  if (batchAbort) return; // already running
+  const eligible = satellitesList.filter(
+    (s) => s.enabled !== false && Number.isFinite(Number(s.noradId)),
+  );
+  if (eligible.length === 0) {
+    showMobileConnStatus('No satellites with a NORAD ID to refresh.', 'error');
+    return;
+  }
+
+  batchAbort = new AbortController();
+  const progressEl = document.getElementById('mBatchProgress');
+  const fillEl = document.getElementById('mBatchBarFill');
+  const labelEl = document.getElementById('mBatchLabel');
+  const cancelBtn = document.getElementById('mBatchCancelBtn');
+  const refreshBtn = document.getElementById('mRefreshFocusedBtn');
+  const fetchAllBtn = document.getElementById('mFetchAllBtn');
+
+  if (progressEl) progressEl.hidden = false;
+  if (labelEl) labelEl.textContent = formatBatchLabel(0, eligible.length);
+  if (fillEl) fillEl.style.width = `${formatBatchPercent(0, eligible.length)}%`;
+  if (refreshBtn) refreshBtn.disabled = true;
+  if (fetchAllBtn) fetchAllBtn.disabled = true;
+  if (cancelBtn) cancelBtn.disabled = false;
+
+  for (const sat of eligible) setChipFetchState(sat.id, 'pending');
+
+  let done = 0;
+  let ok = 0;
+  let fail = 0;
+  const updateProgress = () => {
+    if (labelEl) labelEl.textContent = formatBatchLabel(done, eligible.length);
+    if (fillEl) fillEl.style.width = `${formatBatchPercent(done, eligible.length)}%`;
+  };
+
+  const worker = async (sat) => {
+    if (batchAbort?.signal.aborted) throw new Error('Cancelled');
+    try {
+      const tle = await fetchLatestTLE(Number(sat.noradId));
+      const parsed = parseFetchedTle(tle);
+      if (!parsed) throw new Error('Malformed TLE response');
+      await persistFetchedTle(sat, parsed);
+      setChipFetchState(sat.id, 'success');
+      ok += 1;
+    } catch (err) {
+      setChipFetchState(sat.id, 'error');
+      fail += 1;
+      throw err;
+    } finally {
+      done += 1;
+      updateProgress();
+    }
+  };
+
+  showMobileConnStatus(`Fetching ${eligible.length} satellites…`, 'info');
+  await runWithConcurrency(eligible, FETCH_BATCH_CONCURRENCY, worker, { signal: batchAbort.signal });
+
+  const wasAborted = batchAbort.signal.aborted;
+  batchAbort = null;
+
+  // Re-enable buttons via setConnState (which re-evaluates batchAbort==null).
+  // Manually re-poke because connState didn't change.
+  if (refreshBtn) refreshBtn.disabled = connState !== 'online';
+  if (fetchAllBtn) fetchAllBtn.disabled = connState !== 'online';
+
+  // Linger at 100% for 1s so the user sees completion, then hide.
+  setTimeout(() => { if (progressEl) progressEl.hidden = true; }, 1000);
+
+  if (wasAborted) {
+    showMobileConnStatus(`Cancelled. ${ok} updated, ${fail} failed, ${eligible.length - done} skipped.`, 'info');
+  } else if (fail === 0) {
+    showMobileConnStatus(`Refreshed ${ok} satellites.`, 'success');
+  } else {
+    showMobileConnStatus(`Refreshed ${ok}, failed ${fail}.`, fail === eligible.length ? 'error' : 'info');
+  }
+}
+
+function handleBatchCancel() {
+  if (!batchAbort) return;
+  batchAbort.abort();
+  // pending chips' state will be cleared by their workers' final
+  // setChipFetchState on rejection. Workers that haven't started won't run
+  // their chip update, so we proactively clear after a short delay.
+  setTimeout(() => {
+    for (const sat of satellitesList) {
+      const chip = document.querySelector(`.m-chip[data-sat-id="${cssEscape(sat.id)}"]`);
+      if (chip && chip.dataset.fetch === 'pending') chip.removeAttribute('data-fetch');
+    }
+  }, 200);
+}
+
+function setupConnAndTle() {
+  const connBtn = document.getElementById('mConnCheckBtn');
+  const dotBtn = document.getElementById('mConnDot');
+  const refreshBtn = document.getElementById('mRefreshFocusedBtn');
+  const fetchAllBtn = document.getElementById('mFetchAllBtn');
+  const cancelBtn = document.getElementById('mBatchCancelBtn');
+
+  if (connBtn) connBtn.addEventListener('click', () => runConnectionCheck());
+  if (dotBtn) dotBtn.addEventListener('click', () => runConnectionCheck());
+  if (refreshBtn) refreshBtn.addEventListener('click', handleRefreshFocused);
+  if (fetchAllBtn) fetchAllBtn.addEventListener('click', handleFetchAll);
+  if (cancelBtn) cancelBtn.addEventListener('click', handleBatchCancel);
+
+  // Kick off a connection check immediately on boot so the user lands on
+  // a known state (and the fetch buttons enable / disable correctly).
+  runConnectionCheck(/* silent */ true);
 }
 
 // ─── Data loading ─────────────────────────────────────────────────────────
@@ -161,18 +581,27 @@ async function loadInitialData() {
 
     patch('antennaMappings', Array.isArray(mappings) ? mappings : []);
 
-    satellitesList = Object.values(satRec)
-      .filter((s) => s.enabled !== false)
-      .sort((a, b) => {
-        const g = String(a.groupName || '').localeCompare(String(b.groupName || ''));
-        return g !== 0 ? g : String(a.name || '').localeCompare(String(b.name || ''));
-      });
+    satellitesList = rebuildSatellitesList(satRec);
 
     stationsList = Object.values(stationRec)
       .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
   } catch (err) {
     showToast('Failed to load data: ' + (err?.message || err));
   }
+}
+
+/**
+ * Pure helper — builds the sorted, enabled-only satellites list from a
+ * record-by-id map. Extracted so both loadInitialData() and the
+ * 'satellites' store subscriber can share one source of truth.
+ */
+function rebuildSatellitesList(satRec) {
+  return Object.values(satRec || {})
+    .filter((s) => s && s.enabled !== false)
+    .sort((a, b) => {
+      const g = String(a.groupName || '').localeCompare(String(b.groupName || ''));
+      return g !== 0 ? g : String(a.name || '').localeCompare(String(b.name || ''));
+    });
 }
 
 // ─── Viewer creation ──────────────────────────────────────────────────────

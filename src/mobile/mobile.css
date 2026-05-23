@@ -457,7 +457,206 @@ html, body {
   pointer-events: none;
 }
 
+/* ====== Connection & TLE — top-bar dot, sheet section, batch progress ====== */
+
+/* WCAG 2.4.7 visible focus + screen-reader-only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 6px dot in the top bar — hidden when online (silence is the norm),
+   amber-pulse while checking, accent-pulse while fetching, red when offline. */
+.m-conn-dot {
+  flex-shrink: 0;
+  width: 14px;            /* tappable hit area is the full 14px; the dot itself is 6px via ::before */
+  height: 28px;
+  padding: 0;
+  margin: 0 2px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.m-conn-dot::before {
+  content: '';
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
+.m-conn-dot[data-state="idle"]    { display: none; }
+.m-conn-dot[data-state="online"]  { display: none; }
+.m-conn-dot[data-state="checking"]::before {
+  background: #fbbf24;
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.25);
+  animation: m-pulse 1s ease-in-out infinite;
+}
+.m-conn-dot[data-state="fetching"]::before {
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-dim);
+  animation: m-pulse 0.8s ease-in-out infinite;
+}
+.m-conn-dot[data-state="offline"]::before {
+  background: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25);
+}
+
+/* Section title row with a right-aligned secondary action / pill */
+.m-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.m-section-header .m-section-title {
+  margin: 0;
+}
+
+/* Inline pill (status badge next to section title) */
+.m-conn-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--glass-inner);
+  border: 1px solid var(--glass-border);
+  color: var(--text-dim);
+}
+.m-conn-pill[data-state="online"]  { color: var(--green); border-color: var(--green-dim); }
+.m-conn-pill[data-state="offline"] { color: #fca5a5; border-color: rgba(239, 68, 68, 0.35); }
+.m-conn-pill[data-state="checking"], .m-conn-pill[data-state="fetching"] {
+  color: var(--accent); border-color: var(--accent-strong);
+}
+
+/* In-sheet "Check Connection" button — mirrors desktop .conn-indicator states. */
+.m-conn-inline {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex-shrink: 0;
+  display: inline-block;
+}
+.m-conn-inline[data-state="online"]  { background: var(--green);     box-shadow: 0 0 0 2px var(--green-dim); }
+.m-conn-inline[data-state="offline"] { background: #ef4444;          box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25); }
+.m-conn-inline[data-state="checking"], .m-conn-inline[data-state="fetching"] {
+  background: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim);
+  animation: m-pulse 1s ease-in-out infinite;
+}
+
+#mConnCheckBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.m-conn-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.m-conn-row-pair > .m-icon-btn {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Persistent status message (mirrors desktop .conn-status info/success/error) */
+.m-conn-status {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--radius-xs);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.m-conn-status.info {
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+}
+.m-conn-status.success {
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  color: #86efac;
+}
+.m-conn-status.error {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+
+/* Batch progress: thin linear bar + N/M counter + cancel */
+.m-batch-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.m-batch-bar {
+  width: 100%;
+  height: 3px;
+  background: var(--glass-inner);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.m-batch-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.15s linear;
+}
+.m-batch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.m-batch-label {
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* Per-chip fetch state (left-edge accent / success / error tinting).
+   The chip is already a flex row, so a 2px left border alone shifts the
+   layout; we keep the border at the normal 1px width but bump its colour. */
+.m-chip[data-fetch="pending"] {
+  border-color: var(--accent-strong);
+  animation: m-pulse 0.9s ease-in-out infinite;
+}
+.m-chip[data-fetch="success"] {
+  border-color: var(--green);
+}
+.m-chip[data-fetch="error"] {
+  border-color: #fbbf24;
+  color: #fbbf24;
+}
+
+@keyframes m-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
 /* Reduce motion */
 @media (prefers-reduced-motion: reduce) {
   #mSheet { transition: none; }
+  .m-conn-dot::before,
+  .m-conn-inline,
+  .m-chip[data-fetch="pending"] { animation: none !important; }
+  .m-batch-bar-fill { transition: none !important; }
 }

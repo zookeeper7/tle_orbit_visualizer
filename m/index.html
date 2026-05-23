@@ -50,6 +50,7 @@
   <header id="mTopBar">
     <button type="button" id="mPlayPause" class="m-icon-btn m-play-btn" aria-label="Pause playback" aria-pressed="true">⏸</button>
     <span id="mClockText" class="m-clock" aria-live="off">--/-- --:--:--Z</span>
+    <button type="button" id="mConnDot" class="m-conn-dot" data-state="idle" aria-label="Check internet connection" title="Connection status"></button>
     <button type="button" id="mLiveBadge" class="m-live-badge" hidden></button>
     <div class="m-top-actions">
       <button type="button" id="mModeToggle" class="m-icon-btn" aria-label="Toggle 2D/3D">2D</button>
@@ -78,6 +79,31 @@
         </div>
       </section>
 
+      <section class="m-section" id="mConnTleSection">
+        <div class="m-section-header">
+          <h2 class="m-section-title">Connection &amp; TLE</h2>
+          <span id="mConnPill" class="m-conn-pill" hidden></span>
+        </div>
+        <div class="m-conn-row">
+          <button type="button" id="mConnCheckBtn" class="m-icon-btn">
+            <span id="mConnInline" class="m-conn-inline" data-state="idle"></span>
+            <span id="mConnLabel">Check Connection</span>
+          </button>
+        </div>
+        <div class="m-conn-row m-conn-row-pair">
+          <button type="button" id="mRefreshFocusedBtn" class="m-icon-btn" disabled title="Refresh focused satellite's TLE">Refresh focused</button>
+          <button type="button" id="mFetchAllBtn" class="m-icon-btn" disabled title="Refresh every satellite that has a NORAD ID">Fetch all</button>
+        </div>
+        <div id="mBatchProgress" class="m-batch-progress" hidden>
+          <div class="m-batch-bar"><div id="mBatchBarFill" class="m-batch-bar-fill"></div></div>
+          <div class="m-batch-row">
+            <span id="mBatchLabel" class="m-batch-label">0 / 0</span>
+            <button type="button" id="mBatchCancelBtn" class="m-icon-btn m-icon-btn-compact">Cancel</button>
+          </div>
+        </div>
+        <div id="mConnStatus" class="m-conn-status" role="status" aria-live="polite" hidden></div>
+      </section>
+
       <section class="m-section" id="mSatSection">
         <h2 class="m-section-title">Satellites</h2>
         <div id="mSatList" class="m-chip-list" role="group" aria-label="Satellite selector"></div>
@@ -96,5 +122,6 @@
   </section>
 
   <div id="mToast" class="m-toast" role="status" aria-live="polite" hidden></div>
+  <div id="mSrLive" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>
