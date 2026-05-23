@@ -100,6 +100,20 @@ export function propagateOrbit(satrec, options = {}) {
 
       const posEci = pv.position; // km, TEME
       const velEci = pv.velocity; // km/s, TEME
+
+      // SGP4 returns numeric x/y/z but the values can be NaN when the
+      // propagation goes numerically unstable — typically because the
+      // TLE epoch is far in the past (preset placeholder TLEs are a
+      // common case here). If we feed a NaN into Cesium downstream, the
+      // SampledPositionProperty quietly carries it, and the renderer
+      // then trips "Invalid array length" inside
+      // createPotentiallyVisibleSet when frustum-culling the entity.
+      if (
+        !Number.isFinite(posEci.x) || !Number.isFinite(posEci.y) || !Number.isFinite(posEci.z)
+      ) {
+        continue;
+      }
+
       const gmst = satellite.gstime(date);
       const geo = satellite.eciToGeodetic(posEci, gmst);
 
@@ -107,11 +121,18 @@ export function propagateOrbit(satrec, options = {}) {
       const latDeg = geo.latitude * (180 / Math.PI);
       const heightKm = geo.height;
 
+      if (!Number.isFinite(lonDeg) || !Number.isFinite(latDeg) || !Number.isFinite(heightKm)) {
+        continue;
+      }
+
       // Wrap longitude to [-180, 180]
       while (lonDeg > 180) lonDeg -= 360;
       while (lonDeg < -180) lonDeg += 360;
 
-      const speed = Math.sqrt(velEci.x ** 2 + velEci.y ** 2 + velEci.z ** 2);
+      const vx = velEci && Number.isFinite(velEci.x) ? velEci.x : 0;
+      const vy = velEci && Number.isFinite(velEci.y) ? velEci.y : 0;
+      const vz = velEci && Number.isFinite(velEci.z) ? velEci.z : 0;
+      const speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
 
       positions.push({
         date,
