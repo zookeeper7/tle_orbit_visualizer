@@ -19,17 +19,27 @@
   --radius-sm: 10px;
   --radius-xs: 8px;
 
-  /* Sheet snap point offsets (translateY values) */
-  --sheet-h-peek: calc(100dvh - 96px);
-  --sheet-h-half: calc(60dvh);
-  --sheet-h-full: 24px;
+  /* Minimum clearance between the sheet's top edge and the viewport top,
+   * so the sheet (even fully expanded) never overlaps the fixed top
+   * navigation bar (48 px tall) — 48 px for the bar plus 8 px breathing room.
+   */
+  --sheet-top-min: 56px;
+
+  /* Sheet snap point offsets (translateY values, measured from `bottom: 0`).
+   * Each value is chosen so that `box top edge + translateY == sheet-top-min`
+   * at the "full" snap, and the peek/half snaps still reveal exactly 96 px
+   * and 40 dvh of the sheet respectively, given the new clipped max-height.
+   */
+  --sheet-h-peek: calc(100dvh - 96px - var(--sheet-top-min));
+  --sheet-h-half: calc(60dvh - var(--sheet-top-min));
+  --sheet-h-full: 0px;
 }
 
 @supports not (height: 100dvh) {
   :root {
-    --sheet-h-peek: calc(100vh - 96px);
-    --sheet-h-half: calc(60vh);
-    --sheet-h-full: 24px;
+    --sheet-h-peek: calc(100vh - 96px - var(--sheet-top-min));
+    --sheet-h-half: calc(60vh - var(--sheet-top-min));
+    --sheet-h-full: 0px;
   }
 }
 
@@ -169,7 +179,11 @@ html, body {
   right: 0;
   bottom: 0;
   z-index: 15;
-  max-height: 100dvh;
+  /* Cap the box so it can never extend up into the top navigation bar.
+   * Combined with `--sheet-h-full: 0`, this means the sheet's visible top
+   * edge sits at exactly `--sheet-top-min` when fully expanded.
+   */
+  max-height: calc(100dvh - var(--sheet-top-min));
   background: var(--glass-bg);
   border-top: 1px solid var(--glass-border);
   border-top-left-radius: var(--radius);
@@ -188,7 +202,7 @@ html, body {
 #mSheet.sheet-full  { transform: translateY(var(--sheet-h-full)); }
 
 @supports not (height: 100dvh) {
-  #mSheet { max-height: 100vh; }
+  #mSheet { max-height: calc(100vh - var(--sheet-top-min)); }
 }
 
 .m-sheet-handle {
