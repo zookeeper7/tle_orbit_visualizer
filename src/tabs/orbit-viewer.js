@@ -712,7 +712,13 @@ export function initOrbitViewer(viewer) {
       }
 
       showConnStatus(`Latest TLE loaded for ${sat.name}`, 'success');
-      visualize();
+      // resetClock so the playhead jumps to "now" (or the custom reference
+      // time) and the camera ends up on the satellite's *real* current
+      // location — not wherever the playhead happened to be sitting when
+      // Fetch was clicked. Without this, the camera would zoom to the
+      // entity at the stale clock time and users would see the satellite
+      // in the wrong place, which used to look like a broken tracker.
+      visualize({ resetClock: true });
     } catch (err) {
       showConnStatus(err.message, 'error');
     } finally {
@@ -1269,12 +1275,27 @@ export function initOrbitViewer(viewer) {
       if (!skipZoom) {
         viewer.trackedEntity = undefined;
         if (entities.length === 1) {
-          // Auto-track when visualizing a single satellite. Resolve sat ID
-          // from the entity name (entity.name was set to the satellite name
-          // by addSatelliteVisualization).
+          // Resolve sat ID from the entity name (set by
+          // addSatelliteVisualization). If tracking was already active for
+          // THIS satellite (e.g. the user had clicked Track before
+          // triggering a re-visualize via Fetch Latest TLE / Auto Refresh
+          // / a slider change), re-attach the camera to the freshly-built
+          // entity so tracking stays continuous. Otherwise just zoom to
+          // the entity once and leave the camera under user control —
+          // automatically starting tracking on every re-visualize used
+          // to surprise users with a "snapped-to-satellite" view they
+          // never asked for.
           const onlyEntity = entities[0];
           const onlySatId = Object.keys(satById).find((id) => satById[id].name === onlyEntity.name);
-          if (onlySatId) startCustomTracking(onlySatId, onlyEntity);
+          const wasTrackingThisSat = onlySatId && customTrackingSatId === onlySatId;
+          if (wasTrackingThisSat) {
+            startCustomTracking(onlySatId, onlyEntity);
+          } else {
+            // If we were tracking some OTHER satellite that's no longer
+            // in the scene, release that camera lock.
+            if (customTrackingSatId) stopCustomTracking();
+            viewer.zoomTo(onlyEntity, new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), currentAvgAltKm ? currentAvgAltKm * 8000 : 8_000_000));
+          }
         } else if (entities.length > 1) {
           stopCustomTracking();
           viewer.zoomTo(entities, new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), currentAvgAltKm ? currentAvgAltKm * 8000 : 8_000_000));
