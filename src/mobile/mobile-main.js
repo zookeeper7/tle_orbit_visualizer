@@ -934,7 +934,7 @@ async function syncVisualization() {
       }
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.warn('[mobile] failed to visualize', sat.id, err);
+      console.warn('[mobile] failed to visualize', sat.id, '\ntle:\n' + (sat.tle || '(empty)'), '\nerror:', err);
     }
   }
 
