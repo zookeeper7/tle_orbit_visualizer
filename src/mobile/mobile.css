@@ -1,0 +1,385 @@
+/* ====== Mobile design tokens (verbatim copy of style.css :root) ====== */
+:root {
+  --glass-bg: rgba(12, 14, 28, 0.55);
+  --glass-bg-hover: rgba(20, 24, 48, 0.6);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-hover: rgba(255, 255, 255, 0.15);
+  --glass-blur: 16px;             /* lower than desktop's 24px — cheaper on mobile GPU */
+  --glass-inner: rgba(255, 255, 255, 0.03);
+  --accent: #7dd3fc;
+  --accent-dim: rgba(125, 211, 252, 0.25);
+  --accent-glow: rgba(125, 211, 252, 0.12);
+  --accent-strong: rgba(125, 211, 252, 0.5);
+  --text: #e2e8f0;
+  --text-dim: #8899b0;
+  --text-faint: rgba(148, 163, 184, 0.5);
+  --green: #22c55e;
+  --green-dim: rgba(34, 197, 94, 0.2);
+  --radius: 16px;
+  --radius-sm: 10px;
+  --radius-xs: 8px;
+
+  /* Sheet snap point offsets (translateY values) */
+  --sheet-h-peek: calc(100dvh - 96px);
+  --sheet-h-half: calc(60dvh);
+  --sheet-h-full: 24px;
+}
+
+@supports not (height: 100dvh) {
+  :root {
+    --sheet-h-peek: calc(100vh - 96px);
+    --sheet-h-half: calc(60vh);
+    --sheet-h-full: 24px;
+  }
+}
+
+/* ====== Reset / page shell ====== */
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background: #060610;
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+/* ====== Cesium canvas — fills viewport ====== */
+#mCesium {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+#mCesium canvas {
+  touch-action: none;             /* prevents browser scroll while panning the map */
+}
+
+/* Hide Cesium's own credits overlay on mobile (legal credits remain via infobox=false) */
+.cesium-widget-credits { display: none !important; }
+
+/* ====== Top bar ====== */
+#mTopBar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  height: 48px;
+  padding: 6px 12px;
+  padding-top: max(6px, env(safe-area-inset-top));
+  height: calc(48px + env(safe-area-inset-top));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--glass-bg);
+  border-bottom: 1px solid var(--glass-border);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+.m-title {
+  flex: 1;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.m-top-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.m-icon-btn {
+  min-width: 44px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--glass-inner);
+  border: 1px solid var(--glass-border);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.m-icon-btn:active {
+  background: var(--glass-bg-hover);
+  border-color: var(--accent-strong);
+}
+
+.m-icon-btn[aria-pressed="true"] {
+  background: var(--accent-dim);
+  border-color: var(--accent-strong);
+  color: var(--accent);
+}
+
+/* ====== Bottom sheet ====== */
+#mSheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 15;
+  max-height: 100dvh;
+  background: var(--glass-bg);
+  border-top: 1px solid var(--glass-border);
+  border-top-left-radius: var(--radius);
+  border-top-right-radius: var(--radius);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  transform: translateY(var(--sheet-h-peek));
+  transition: transform 0.3s ease-out;
+  padding-bottom: env(safe-area-inset-bottom);
+  display: flex;
+  flex-direction: column;
+}
+
+#mSheet.sheet-peek  { transform: translateY(var(--sheet-h-peek)); }
+#mSheet.sheet-half  { transform: translateY(var(--sheet-h-half)); }
+#mSheet.sheet-full  { transform: translateY(var(--sheet-h-full)); }
+
+@supports not (height: 100dvh) {
+  #mSheet { max-height: 100vh; }
+}
+
+.m-sheet-handle {
+  display: block;
+  width: 100%;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: grab;
+  position: relative;
+}
+
+.m-sheet-handle::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--text-faint);
+}
+
+.m-sheet-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.m-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.m-section-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* Satellite chip selector */
+.m-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.m-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--glass-inner);
+  border: 1px solid var(--glass-border);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.m-chip:active { background: var(--glass-bg-hover); }
+
+.m-chip[aria-pressed="true"] {
+  background: var(--accent-dim);
+  border-color: var(--accent-strong);
+  color: var(--accent);
+}
+
+.m-chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dot-color, var(--accent));
+  flex-shrink: 0;
+}
+
+/* Focused TLE card */
+.m-card {
+  background: var(--glass-inner);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.m-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.m-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.m-tle-text {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: var(--radius-xs);
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  white-space: pre;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Pass cards */
+.m-pass-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.m-pass-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  align-items: baseline;
+  padding: 8px 10px;
+  background: var(--glass-inner);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.m-pass-station {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.m-pass-when {
+  color: var(--text-dim);
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 11px;
+  text-align: right;
+}
+
+.m-pass-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 12px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+}
+
+.m-pass-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+/* Track FAB */
+.m-fab {
+  position: fixed;
+  right: 16px;
+  z-index: 25;
+  bottom: calc(112px + env(safe-area-inset-bottom));
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--glass-bg);
+  border: 1px solid var(--accent-strong);
+  color: var(--accent);
+  font-size: 22px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+.m-fab[aria-pressed="true"] {
+  background: var(--accent);
+  color: #060610;
+}
+
+/* Toast notification */
+.m-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(140px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 30;
+  padding: 8px 14px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  pointer-events: none;
+}
+
+/* Reduce motion */
+@media (prefers-reduced-motion: reduce) {
+  #mSheet { transition: none; }
+}

@@ -7,7 +7,9 @@
     "dev": "vite",
     "server": "node server.js",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [
     "TLE",
@@ -27,6 +29,8 @@
     "vite-plugin-cesium": "^1.2.23"
   },
   "devDependencies": {
-    "esbuild": "^0.27.4"
+    "esbuild": "^0.27.4",
+    "jsdom": "^25.0.1",
+    "vitest": "^2.1.9"
   }
 }

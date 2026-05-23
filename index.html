@@ -5,6 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TLE Visualizer</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <script>
+    // Mobile redirect. Runs before any module script so mobile visitors
+    // never see the desktop bundle download. The escape hatch:
+    //   /m/?desktop=1  → strips the flag and redirects back to /, while
+    //   sessionStorage.forceDesktop='1' keeps the choice for the session.
+    // iPad is deliberately NOT matched: modern iPadOS Safari reports a
+    // desktop UA by default and iPad has the screen size for the desktop UX.
+    (function () {
+      try {
+        if (sessionStorage.getItem('forceDesktop') === '1') return;
+      } catch (_) { /* sessionStorage blocked → fall through */ }
+      var ua = navigator.userAgent || '';
+      if (!/Mobi|Android|iPhone|iPod/i.test(ua)) return;
+      var p = window.location.pathname;
+      if (/(^|\/)m\/(index\.html)?$/.test(p)) return;
+      window.location.replace('m/' + (window.location.search || ''));
+    })();
+  </script>
 </head>
 <body>
 

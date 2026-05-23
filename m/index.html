@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!--
+    Mobile entry. Must stay tiny: the inline script below has to run BEFORE
+    any module script so that:
+      1. The "?desktop=1" escape hatch redirects back to the desktop page
+         and persists the choice for the rest of the session.
+      2. Cesium's runtime knows where its workers/assets live. The shared
+         /dist/cesium/ directory sits one level above /m/, so we set
+         CESIUM_BASE_URL to '../cesium/'. (The static <link>/<script>
+         tags emitted by vite-plugin-cesium are rewritten to '../cesium/'
+         at build time by the mobile-cesium-rewrite plugin in vite.config.js,
+         so this only matters for runtime worker URL resolution.)
+  -->
+  <script>
+    (function () {
+      try {
+        var params = new URLSearchParams(window.location.search);
+        if (params.has('desktop')) {
+          try { sessionStorage.setItem('forceDesktop', '1'); } catch (_) {}
+          // Strip the flag so the URL doesn't keep it around after redirect.
+          params.delete('desktop');
+          var qs = params.toString();
+          window.location.replace('../' + (qs ? '?' + qs : ''));
+          return;
+        }
+      } catch (_) {
+        // sessionStorage / URLSearchParams not available — fall through to
+        // the normal mobile boot, which is still safe.
+      }
+      window.CESIUM_BASE_URL = '../cesium/';
+    })();
+  </script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no, maximum-scale=1.0">
+  <meta name="theme-color" content="#060610">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>TLE Visualizer — Mobile</title>
+  <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+  <script type="module" src="../src/mobile/mobile-main.js"></script>
+</head>
+<body>
+  <div id="mCesium"></div>
+
+  <header id="mTopBar">
+    <h1 class="m-title">TLE Visualizer</h1>
+    <div class="m-top-actions">
+      <button type="button" id="mModeToggle" class="m-icon-btn" aria-label="Toggle 2D/3D">2D</button>
+      <button type="button" id="mSheetToggle" class="m-icon-btn" aria-label="Toggle satellite panel">☰</button>
+    </div>
+  </header>
+
+  <section id="mSheet" class="sheet-peek" aria-label="Satellite panel">
+    <button type="button" id="mSheetHandle" class="m-sheet-handle" aria-label="Drag sheet"></button>
+    <div class="m-sheet-body">
+      <section class="m-section" id="mSatSection">
+        <h2 class="m-section-title">Satellites</h2>
+        <div id="mSatList" class="m-chip-list" role="group" aria-label="Satellite selector"></div>
+      </section>
+
+      <section class="m-section" id="mFocusedSection" hidden>
+        <h2 class="m-section-title">Focused TLE</h2>
+        <div id="mFocusedCard" class="m-card"></div>
+      </section>
+
+      <section class="m-section" id="mPassesSection">
+        <h2 class="m-section-title">Next Passes</h2>
+        <div id="mPassesList" class="m-pass-list" aria-live="polite"></div>
+      </section>
+    </div>
+  </section>
+
+  <button type="button" id="mTrackFab" class="m-fab" aria-label="Track focused satellite" hidden>◎</button>
+
+  <div id="mToast" class="m-toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
