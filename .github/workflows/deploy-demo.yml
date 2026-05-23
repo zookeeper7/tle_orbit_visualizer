@@ -5,8 +5,11 @@ name: Deploy demo to GitHub Pages
 # visitor gets an isolated copy of the seed data in their browser's
 # localStorage.
 #
-# Repository setup (one-time, by a maintainer with admin rights):
-#   Settings → Pages → "Build and deployment" → Source: GitHub Actions
+# Self-bootstrapping: the Configure Pages step below uses enablement: true
+# so the very first workflow run on a fresh fork will turn Pages on and
+# set the source to GitHub Actions automatically — no admin click needed
+# (assuming the workflow already has the pages: write / id-token: write
+# permissions declared below, which it does).
 
 on:
   push:
@@ -51,6 +54,10 @@ jobs:
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
+        with:
+          # Enable Pages on first run if the repo doesn't have it yet.
+          # Requires the pages: write permission declared at the top.
+          enablement: true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

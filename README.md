@@ -79,7 +79,7 @@ The same codebase ships a static-only demo build that runs without the Express +
 
 **Per-visitor isolation.** Each browser gets its own private copy of the data in `localStorage`, scoped to `(origin, browser profile)`. One visitor's edits never reach another visitor. Incognito sessions, other browsers, and other devices each start from the seed defaults. Clearing the site's storage resets everything.
 
-**Hosted on GitHub Pages.** Every push to `main` rebuilds and republishes the demo via [`.github/workflows/deploy-demo.yml`](.github/workflows/deploy-demo.yml). On a fresh fork, enable it via **Settings → Pages → Source: GitHub Actions**.
+**Hosted on GitHub Pages.** Every push to `main` rebuilds and republishes the demo via [`.github/workflows/deploy-demo.yml`](.github/workflows/deploy-demo.yml). The workflow uses `actions/configure-pages` with `enablement: true`, so a fresh fork's first run will turn Pages on automatically — no manual admin step required. (If your fork has Pages locked down by org policy, fall back to **Settings → Pages → Source: GitHub Actions**.)
 
 Build it locally (relative-base output, works under any sub-path):
 
