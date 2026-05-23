@@ -733,7 +733,7 @@ function setupSheet() {
     return 0;
   }
 
-  function settleToNearestSnap(currentY) {
+  function nearestSnapIdx(currentY) {
     const snaps = snapTranslateYs();
     let bestIdx = 0;
     let bestDist = Infinity;
@@ -745,10 +745,7 @@ function setupSheet() {
         bestIdx = i;
       }
     }
-    sheet.style.transform = '';  // hand control back to the CSS class
-    sheet.classList.remove(...SHEET_STATES);
-    sheet.classList.add(SHEET_STATES[bestIdx]);
-    sheetStateIdx = bestIdx;
+    return bestIdx;
   }
 
   handle.addEventListener('pointerdown', (e) => {
@@ -782,12 +779,21 @@ function setupSheet() {
       try { handle.releasePointerCapture(activePointerId); } catch (_) {}
       activePointerId = null;
     }
-    // Restore the CSS-defined transition before applying the snap so the
-    // settle animates rather than jumping.
+    // Restore the CSS-defined transition for any subsequent class-based
+    // transform changes (e.g. a follow-up tap that re-snaps to a state).
     sheet.style.transition = '';
 
     if (moved) {
-      settleToNearestSnap(currentTranslateY());
+      // Drag end: do NOT snap. Leave the sheet at the exact translateY
+      // the user released, by keeping the inline transform and dropping
+      // the snap-point class (otherwise the class' translateY would win
+      // back through CSS specificity on the next style recalc).
+      // sheetStateIdx is synced to whichever snap the current position
+      // is closest to, so a subsequent tap on the handle cycles to the
+      // "next" snap from a meaningful starting point rather than jumping
+      // back to wherever the cycle counter last was.
+      sheet.classList.remove(...SHEET_STATES);
+      sheetStateIdx = nearestSnapIdx(currentTranslateY());
     } else {
       // No drag — treat this as a tap and advance to the next snap.
       sheet.style.transform = '';
@@ -806,6 +812,10 @@ function cycleSheetState() {
   sheetStateIdx = (sheetStateIdx + 1) % SHEET_STATES.length;
   const sheet = document.getElementById('mSheet');
   if (!sheet) return;
+  // Clear any inline transform left over from a previous drag so the
+  // snap-class translateY takes effect (and animates via the CSS
+  // transition).
+  sheet.style.transform = '';
   sheet.classList.remove(...SHEET_STATES);
   sheet.classList.add(SHEET_STATES[sheetStateIdx]);
 }
@@ -1062,25 +1072,24 @@ async function syncVisualization() {
         pointsPerOrbit: 120,
         referenceDate: referenceDate || undefined,
       });
-      // The mobile build only overrides drawGroundTrack:false to skip the
-      // clampToGround dashed ground track (the mobile camera rarely sits
-      // close enough to the surface to see it, and it's expensive).
-      //
-      // arcType was previously forced to NONE to dodge a "RangeError:
-      // Invalid array length" thrown from Cesium's generateCartesianArc
-      // when the sample list contained NaN positions, but propagateOrbit
-      // now guards every sample with Number.isFinite checks so the
-      // upstream NaN can no longer reach the tessellator. Leaving arcType
-      // at its GEODESIC default means the 3D taper bands and nadir line
-      // render exactly like the desktop build — which the mobile version
-      // wasn't doing in 3D mode (the NONE option was producing invisible
-      // trails on this Cesium version when SCENE3D was active).
+      // Mobile-specific render options:
+      //   drawGroundTrack: false  — skip the clampToGround dashed ground
+      //     track (rarely useful on mobile camera tilt, and expensive).
+      //   labelScale: 0.55        — bump the satellite-name sprite up
+      //     from the desktop default 0.35. Mobile screens are physically
+      //     small but very high-DPR, and a 0.35 sprite ends up roughly
+      //     half the on-screen size it has on desktop — which is what
+      //     makes the labels look blurry on a phone. The texture itself
+      //     is still rasterized at 48 px, so the larger scale produces a
+      //     bigger sprite of the same crisp glyphs.
+      //   labelOutlineWidth: 7    — proportionally thicker outline so
+      //     the heavier glyph still reads against a busy globe.
       addSatelliteVisualization(
         viewer,
         sat.name,
         result.positions,
         result.info,
-        { drawGroundTrack: false },
+        { drawGroundTrack: false, labelScale: 0.55, labelOutlineWidth: 7 },
         sat.color,
       );
       if (!firstPositions) firstPositions = result.positions;

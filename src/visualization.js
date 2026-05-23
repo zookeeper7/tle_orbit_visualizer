@@ -79,6 +79,19 @@ export function addSatelliteVisualization(viewer, name, positions, orbitalInfo, 
   // difference is invisible at typical zoom levels.
   const arcType = (options && options.arcType !== undefined) ? options.arcType : undefined;
 
+  // Per-satellite label sprite scale. Mobile passes a larger value so the
+  // text reads cleanly on a small, high-DPR phone screen where the
+  // default 0.35 (matched to desktop's 1080p+ landscape viewport) ends up
+  // tiny. The label texture itself is still rasterized at the same font
+  // size, so a larger scale = the same crisp glyphs painted onto a bigger
+  // sprite — no blur from up-scaling.
+  const labelScale = (options && Number.isFinite(options.labelScale))
+    ? options.labelScale
+    : 0.35;
+  const labelOutlineWidth = (options && Number.isFinite(options.labelOutlineWidth))
+    ? options.labelOutlineWidth
+    : 5;
+
   // --- Build SampledPositionProperty (at altitude) ---
   const sampledPosition = new Cesium.SampledPositionProperty();
   sampledPosition.setInterpolationOptions({
@@ -139,10 +152,10 @@ export function addSatelliteVisualization(viewer, name, positions, orbitalInfo, 
     label: {
       text: name,
       font: '600 48px "Segoe UI", system-ui, sans-serif',
-      scale: 0.35,
+      scale: labelScale,
       fillColor: satColor,
       outlineColor: LABEL_OUTLINE,
-      outlineWidth: 5,
+      outlineWidth: labelOutlineWidth,
       style: Cesium.LabelStyle.FILL_AND_OUTLINE,
       pixelOffset: new Cesium.Cartesian2(18, -10),
       showBackground: true,

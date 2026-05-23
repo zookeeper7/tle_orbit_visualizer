@@ -76,14 +76,19 @@ export function addMobileGroundStations(viewer, stations, avgAltKm = null) {
         outlineWidth: 2,
       },
       label: {
+        // Bumped from 30 px / scale 0.28 (≈ 8.4 px on-canvas, half the
+        // desktop equivalent on a high-DPR phone) to a 44 px texture at
+        // scale 0.5 (≈ 22 px on-canvas) so the station name is readable
+        // without zooming in. Higher font size = crisper texture; larger
+        // scale = bigger sprite of those same crisp glyphs.
         text: s.name || s.id,
-        font: '600 30px "Segoe UI", system-ui, sans-serif',
-        scale: 0.28,
+        font: '600 44px "Segoe UI", system-ui, sans-serif',
+        scale: 0.5,
         fillColor: Cesium.Color.fromCssColorString('#34d399'),
         outlineColor: LABEL_OUTLINE,
-        outlineWidth: 4,
+        outlineWidth: 6,
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        pixelOffset: new Cesium.Cartesian2(12, -8),
+        pixelOffset: new Cesium.Cartesian2(14, -10),
       },
     });
     _gsEntities.push(marker);
