@@ -1312,22 +1312,38 @@ export function initOrbitViewer(viewer) {
             viewer.zoomTo(onlyEntity, new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), currentAvgAltKm ? currentAvgAltKm * 8000 : 8_000_000));
           }
         } else if (entities.length > 1) {
-          stopCustomTracking();
-          // "Visualize All" with multiple satellites: zoomTo(entities, hpr)
-          // computes a union BoundingSphere whose center lands INSIDE the
-          // Earth for any globally-distributed LEO constellation — the
-          // ECEF position vectors of satellites on opposite sides of the
-          // globe partially cancel. The HeadingPitchRange `range` is then
-          // measured from that subterranean center, placing the camera at
-          // a nonsensical surface point. Cesium's upstream tracker has
-          // acknowledged this since 2015 (CesiumGS/cesium#2812).
+          // Two sub-cases when more than one satellite is on screen:
           //
-          // Instead, fly to Cesium's default home view (the same view the
-          // page opens with — Camera.DEFAULT_VIEW_RECTANGLE), which puts
-          // the whole globe on screen and every LEO orbit is visible.
-          // flyHome() is independent of the homeButton command override
-          // in main.js, so it always reaches the true default view.
-          viewer.camera.flyHome(1.5);
+          //   (a) autoTrackFocused (e.g. Fetch Latest TLE on a focused
+          //       satellite while several others are also selected): the
+          //       user's intent is "follow the satellite I just refreshed"
+          //       — find the focused satellite's entity in the current
+          //       scene and start tracking it. This is the FINAL step
+          //       after visualize finishes, matching the user's mental
+          //       model of "do everything else, then activate tracking".
+          //
+          //   (b) Otherwise (Visualize All / Reset / Auto Refresh): fly
+          //       to Cesium's default home view (Camera.DEFAULT_VIEW_RECTANGLE,
+          //       the same view the page opens with). The old
+          //       zoomTo(entities, hpr) computed a union BoundingSphere
+          //       whose center lands INSIDE the Earth for globally-
+          //       distributed LEO satellites — the ECEF position vectors
+          //       of satellites on opposite sides of the globe partially
+          //       cancel. The HeadingPitchRange `range` was then measured
+          //       from that subterranean center, placing the camera at a
+          //       nonsensical surface point. Upstream-acknowledged in
+          //       CesiumGS/cesium#2812. flyHome() is independent of the
+          //       homeButton command override in main.js, so it always
+          //       reaches the true default view.
+          const focusedEntity = (autoTrackFocused && focusedSatId)
+            ? entities.find((e) => satById[focusedSatId] && satById[focusedSatId].name === e.name)
+            : null;
+          if (focusedEntity) {
+            startCustomTracking(focusedSatId, focusedEntity);
+          } else {
+            stopCustomTracking();
+            viewer.camera.flyHome(1.5);
+          }
         }
         applySceneMode(viewer);
       }
