@@ -56,6 +56,7 @@ import {
 } from './conn-tle-helpers.js';
 import {
   addSatelliteVisualization,
+  applySceneMode,
   clearVisualization,
 } from '../visualization.js';
 import {
@@ -103,6 +104,16 @@ async function bootstrap() {
     }),
   });
   attachMobileLifecycle(viewer);
+
+  // Re-apply entity scene-mode visibility every time Cesium finishes a
+  // 2D <-> 3D morph. addSatelliteVisualization calls applySceneMode once
+  // at creation time, but without this listener the cached visibility
+  // never updates on a mode toggle and the 3D-only taper bands + nadir
+  // line stay hidden after the user taps "3D" in the top bar.
+  // (Desktop's orbit-viewer.js attaches the identical listener.)
+  viewer.scene.morphComplete.addEventListener(() => {
+    applySceneMode(viewer);
+  });
 
   addMobileGroundStations(viewer, stationsList);
 
