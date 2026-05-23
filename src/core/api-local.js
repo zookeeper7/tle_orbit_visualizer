@@ -19,6 +19,7 @@ import { DEFAULT_STATIONS } from '../ground-stations.js';
 import { PRESETS } from '../presets.js';
 import { parseMaskCSV } from './azimuth-mask.js';
 import { fetchLatestTLE } from '../tle-fetch.js';
+import { patch } from './app-store.js';
 
 const NS = 'tle-viz';
 const K = {
@@ -378,6 +379,7 @@ function refreshPresetTlesFromCelesTrak() {
     if (!Array.isArray(satellites) || satellites.length === 0) return;
 
     let updated = 0;
+    const updatedRows = []; // collected for the app-store patch below
     for (const result of results) {
       if (result.status !== 'fulfilled') continue;
       const { id, tleText } = result.value;
@@ -397,10 +399,40 @@ function refreshPresetTlesFromCelesTrak() {
         sat.tleLine2 = tleLine2;
         sat.updatedAt = nowIso();
         updated += 1;
+        updatedRows.push({ id, tleLine0, tleLine1, tleLine2, updatedAt: sat.updatedAt });
       }
     }
 
-    if (updated > 0) writeRaw(K.satellites, satellites);
+    if (updated > 0) {
+      writeRaw(K.satellites, satellites);
+
+      // Notify the in-memory app-store so any subscriber (e.g. mobile-main's
+      // 'satellites' subscriber that rebuilds satellitesList + re-runs
+      // syncVisualization for the focused sat) sees the update. The guard
+      // above (updated > 0) is critical because patch() fires subscribers
+      // unconditionally — a no-op call would cause re-render thrash on
+      // every page load where CelesTrak returns no new TLE.
+      //
+      // The `if (current[u.id])` inside the updater handles the race where
+      // a background refresh resolves before loadInitialData() has populated
+      // the satellites slice: the patch is a safe no-op, and the subsequent
+      // loadInitialData() patch carries the fresh data forward.
+      patch('satellites', (current) => {
+        for (const u of updatedRows) {
+          if (current[u.id]) {
+            current[u.id] = {
+              ...current[u.id],
+              tleLine0: u.tleLine0,
+              tleLine1: u.tleLine1,
+              tleLine2: u.tleLine2,
+              tle: [u.tleLine0, u.tleLine1, u.tleLine2].filter(Boolean).join('\n'),
+              updatedAt: u.updatedAt,
+            };
+          }
+        }
+        return current;
+      });
+    }
 
     const failures = results.filter((r) => r.status === 'rejected').length;
     if (failures > 0) {
