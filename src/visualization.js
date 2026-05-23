@@ -94,6 +94,19 @@ export function addSatelliteVisualization(viewer, name, positions, orbitalInfo, 
   });
 
   for (const pos of positions) {
+    // Belt-and-suspenders: propagateOrbit already drops NaN samples, but
+    // if a caller hands us hand-built positions we still refuse to feed
+    // NaN into Cesium. A single NaN cartesian inside a
+    // SampledPositionProperty propagates to the entity's BoundingSphere
+    // and trips createPotentiallyVisibleSet with "Invalid array length".
+    if (
+      !pos
+      || !Number.isFinite(pos.longitude)
+      || !Number.isFinite(pos.latitude)
+      || !Number.isFinite(pos.height)
+    ) {
+      continue;
+    }
     const time = Cesium.JulianDate.fromDate(pos.date);
     sampledPosition.addSample(
       time,
