@@ -208,7 +208,7 @@ function subscribeSatellitesSlice() {
     if (focusedSatId && changedIds.includes(focusedSatId)) {
       const sat = satellitesList.find((s) => s.id === focusedSatId);
       if (sat) {
-        try { computeAndRenderPasses(parseTLE(sat.tle)); } catch (_) {}
+        try { computeAndRenderPasses(parseTLE(sat.tle).satrec); } catch (_) {}
       }
     }
   });
@@ -701,7 +701,7 @@ function setupPlayback() {
       if (focusedSatId) {
         const sat = satellitesList.find((s) => s.id === focusedSatId);
         if (sat) {
-          try { computeAndRenderPasses(parseTLE(sat.tle)); } catch (_) {}
+          try { computeAndRenderPasses(parseTLE(sat.tle).satrec); } catch (_) {}
         }
       }
       updatePlaybackUI();
@@ -861,7 +861,7 @@ async function toggleSatellite(satId, makeFocused) {
   if (makeFocused) {
     let satrec;
     try {
-      satrec = parseTLE(sat.tle);
+      satrec = parseTLE(sat.tle).satrec;
     } catch (err) {
       showToast('Bad TLE for ' + sat.name + ': ' + (err?.message || err));
       selectedSatIds.delete(satId);
@@ -901,7 +901,12 @@ async function syncVisualization() {
     const sat = satellitesList.find((s) => s.id === satId);
     if (!sat) continue;
     try {
-      const satrec = parseTLE(sat.tle);
+      // parseTLE returns { satrec, name, line1, line2 } — destructure so we
+      // hand `satellite.propagate` the actual SGP4 record, not the wrapper
+      // object (which would silently yield NaN positions and tank the
+      // visualization on mobile while desktop, which uses destructuring
+      // everywhere, kept working).
+      const { satrec } = parseTLE(sat.tle);
       const result = propagateOrbit(satrec, {
         pastOrbits: 1,
         futureOrbits: 1.5,
