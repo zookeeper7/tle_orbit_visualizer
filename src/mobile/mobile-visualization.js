@@ -212,54 +212,85 @@ function makeTrailCallback(viewer, positions, isPast, bandIdx) {
   let cachedSide = -1;
   let lastUpdate = 0;
 
+  // Pre-compute window scaffolding once — it doesn't depend on currentTime.
+  const total = positions.length;
+  const totalSeconds = total >= 2
+    ? Cesium.JulianDate.secondsDifference(
+        Cesium.JulianDate.fromDate(positions[total - 1].date),
+        Cesium.JulianDate.fromDate(positions[0].date),
+      )
+    : 0;
+  const startJD = total >= 1 ? Cesium.JulianDate.fromDate(positions[0].date) : null;
+  const bandSize = Math.max(1, Math.floor(total / 2 / TAPER_WIDTHS_2D.length));
+  const offsetStart = bandIdx * bandSize;
+  const offsetEnd = (bandIdx + 1) * bandSize;
+
   return function trailCB(currentTime, _result) {
-    if (!currentTime) return [];
-    const nowMs = Date.now();
+    // Guard rails — any of these would otherwise let NaN/Infinity into
+    // a polyline.positions array and crash Cesium's frustum culling
+    // ("RangeError: Invalid array length" at createPotentiallyVisibleSet).
+    try {
+      if (!currentTime || !startJD || total < 2 || !Number.isFinite(totalSeconds) || totalSeconds <= 0) {
+        return cachedSlice || [];
+      }
 
-    const total = positions.length;
-    const ratio = Cesium.JulianDate.secondsDifference(
-      currentTime,
-      Cesium.JulianDate.fromDate(positions[0].date),
-    ) / Cesium.JulianDate.secondsDifference(
-      Cesium.JulianDate.fromDate(positions[total - 1].date),
-      Cesium.JulianDate.fromDate(positions[0].date),
-    );
-    const centerIdx = Math.max(0, Math.min(total - 1, Math.round(ratio * (total - 1))));
+      const elapsed = Cesium.JulianDate.secondsDifference(currentTime, startJD);
+      if (!Number.isFinite(elapsed)) return cachedSlice || [];
 
-    // Band 0 = closest 1/3 of the side, band 2 = furthest 1/3
-    const bandSize = Math.floor(total / 2 / TAPER_WIDTHS_2D.length);
-    const offsetStart = bandIdx * bandSize;
-    const offsetEnd = (bandIdx + 1) * bandSize;
+      const ratio = elapsed / totalSeconds;
+      const centerIdxRaw = Math.round(ratio * (total - 1));
+      if (!Number.isFinite(centerIdxRaw)) return cachedSlice || [];
+      const centerIdx = Math.max(0, Math.min(total - 1, centerIdxRaw));
 
-    const startIdx = isPast
-      ? Math.max(0, centerIdx - offsetEnd)
-      : Math.min(total - 1, centerIdx + offsetStart);
-    const endIdx = isPast
-      ? Math.max(0, centerIdx - offsetStart)
-      : Math.min(total - 1, centerIdx + offsetEnd);
+      const startIdx = isPast
+        ? Math.max(0, centerIdx - offsetEnd)
+        : Math.min(total - 1, centerIdx + offsetStart);
+      const endIdx = isPast
+        ? Math.max(0, centerIdx - offsetStart)
+        : Math.min(total - 1, centerIdx + offsetEnd);
 
-    const lo = Math.min(startIdx, endIdx);
-    const hi = Math.max(startIdx, endIdx);
+      const lo = Math.min(startIdx, endIdx);
+      const hi = Math.max(startIdx, endIdx);
 
-    if (
-      cachedSlice
-      && cachedSide === (isPast ? 0 : 1)
-      && cachedIdx === lo * 10000 + hi
-      && nowMs - lastUpdate < TAPER_REFRESH_MS
-    ) {
-      return cachedSlice;
+      if (
+        cachedSlice
+        && cachedSide === (isPast ? 0 : 1)
+        && cachedIdx === lo * 10000 + hi
+        && Date.now() - lastUpdate < TAPER_REFRESH_MS
+      ) {
+        return cachedSlice;
+      }
+
+      const slice = [];
+      for (let i = lo; i <= hi; i++) {
+        const p = positions[i];
+        if (
+          !p
+          || !Number.isFinite(p.longitude)
+          || !Number.isFinite(p.latitude)
+          || !Number.isFinite(p.height)
+        ) {
+          continue; // skip any invalid sample, never feed NaN into Cartesian3
+        }
+        slice.push(Cesium.Cartesian3.fromDegrees(p.longitude, p.latitude, p.height * 1000));
+      }
+
+      // Cesium polyline needs at least 2 points to draw; if the slice
+      // would be degenerate, keep the previous good slice instead of
+      // a single-point line.
+      if (slice.length < 2) {
+        return cachedSlice || [];
+      }
+
+      cachedSlice = slice;
+      cachedSide = isPast ? 0 : 1;
+      cachedIdx = lo * 10000 + hi;
+      lastUpdate = Date.now();
+      return slice;
+    } catch (_) {
+      // Anything thrown in here (e.g. malformed Date in a sample) would
+      // bubble up to the render loop and stop the whole viewer.
+      return cachedSlice || [];
     }
-
-    const slice = [];
-    for (let i = lo; i <= hi; i++) {
-      const p = positions[i];
-      slice.push(Cesium.Cartesian3.fromDegrees(p.longitude, p.latitude, p.height * 1000));
-    }
-
-    cachedSlice = slice;
-    cachedSide = isPast ? 0 : 1;
-    cachedIdx = lo * 10000 + hi;
-    lastUpdate = nowMs;
-    return slice;
   };
 }

@@ -365,10 +365,15 @@ async function onFocusedSatelliteChanged(sat, satrec) {
 }
 
 /**
- * Cesium's viewer.flyTo(entity) auto-picks a distance that, on a globe with
- * the atmosphere/lighting disabled, often lands too close to see the trail.
- * Instead we read the satellite's current geodetic position and frame a
- * wide window around it — works in both SCENE2D and SCENE3D.
+ * Move the camera so the satellite is centred at a roughly continent-scale
+ * altitude that shows a useful chunk of the orbit trail.
+ *
+ * We use Cartesian3.fromDegrees(lon, lat, 15_000_000) rather than a
+ * Rectangle, because Rectangle.fromDegrees(lon-45, …, lon+45, …) wraps
+ * past ±180° whenever the satellite is anywhere near the antimeridian,
+ * which feeds Cesium a degenerate camera frame and trips
+ * `createPotentiallyVisibleSet` with "Invalid array length". A point
+ * destination is unconditional.
  */
 function flyCameraToSatellite(satId) {
   if (!viewer) return;
@@ -381,21 +386,16 @@ function flyCameraToSatellite(satId) {
     const carto = Cesium.Cartographic.fromCartesian(cart);
     const lon = Cesium.Math.toDegrees(carto.longitude);
     const lat = Cesium.Math.toDegrees(carto.latitude);
-    // Roughly a continent-scale window so both the satellite and a chunk
-    // of its trail are visible at once.
+
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
+
     viewer.camera.flyTo({
-      destination: Cesium.Rectangle.fromDegrees(lon - 45, lat - 30, lon + 45, lat + 30),
+      destination: Cesium.Cartesian3.fromDegrees(lon, lat, 15_000_000), // ~15,000 km up
       duration: 0.6,
     });
   } catch (_) {
-    // Fall back to entity-relative fly with an explicit altitude so the
-    // camera at least doesn't end up inside the planet.
-    try {
-      viewer.flyTo(ent, {
-        duration: 0.6,
-        offset: new Cesium.HeadingPitchRange(0, -Math.PI / 2, 12_000_000),
-      });
-    } catch (_) { /* viewer torn down */ }
+    // Don't try a secondary flyTo — if the primary failed, the safest
+    // outcome is to leave the camera where it is.
   }
 }
 
