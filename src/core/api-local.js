@@ -18,6 +18,7 @@
 import { DEFAULT_STATIONS } from '../ground-stations.js';
 import { PRESETS } from '../presets.js';
 import { parseMaskCSV } from './azimuth-mask.js';
+import { fetchLatestTLE } from '../tle-fetch.js';
 
 const NS = 'tle-viz';
 const K = {
@@ -251,6 +252,7 @@ function ensureSeeded() {
     // the user to clear their storage. See refreshPresetIdentity() for
     // exactly which fields are touched.
     refreshPresetIdentity();
+    refreshPresetTlesFromCelesTrak();
     return;
   }
 
@@ -340,6 +342,72 @@ function ensureSeeded() {
   writeRaw(K.settings, {});
 
   writeRaw(K.seeded, '1');
+
+  // Fire-and-forget: try to replace the placeholder TLE of each preset
+  // with the live one from CelesTrak. UI is already populated with the
+  // placeholder, so this never blocks the user — it just upgrades the
+  // data in the background and the next user-triggered visualization
+  // picks it up.
+  refreshPresetTlesFromCelesTrak();
+}
+
+/**
+ * Background refresh of PRESET satellites' TLE data from CelesTrak.
+ *
+ * Fired once per page load (immediately after ensureSeeded returns)
+ * regardless of whether this is a fresh seed or a returning visitor.
+ * Failures are swallowed with a console warning so users without
+ * internet — or behind a firewall that blocks celestrak.org — still
+ * get the placeholder visualization.
+ *
+ * Each fetch is independent and runs in parallel. Successful results
+ * update only the TLE fields (tleLine0/1/2 + updatedAt); the user's
+ * color, group membership, enabled flag etc. are preserved.
+ */
+function refreshPresetTlesFromCelesTrak() {
+  const presetEntries = Object.entries(PRESETS).filter(([, p]) => p && p.noradId);
+  if (presetEntries.length === 0) return;
+
+  Promise.allSettled(
+    presetEntries.map(async ([id, preset]) => {
+      const tleText = await fetchLatestTLE(preset.noradId);
+      return { id, tleText };
+    }),
+  ).then((results) => {
+    const satellites = readRaw(K.satellites, []);
+    if (!Array.isArray(satellites) || satellites.length === 0) return;
+
+    let updated = 0;
+    for (const result of results) {
+      if (result.status !== 'fulfilled') continue;
+      const { id, tleText } = result.value;
+      const sat = satellites.find((s) => s.id === id);
+      if (!sat || typeof tleText !== 'string') continue;
+
+      const lines = tleText.split('\n').map((l) => l.trim()).filter(Boolean);
+      if (lines.length < 2) continue;
+
+      const tleLine0 = lines.length === 3 ? lines[0] : '';
+      const tleLine1 = lines.length === 3 ? lines[1] : lines[0];
+      const tleLine2 = lines.length === 3 ? lines[2] : lines[1];
+
+      if (sat.tleLine1 !== tleLine1 || sat.tleLine2 !== tleLine2) {
+        sat.tleLine0 = tleLine0;
+        sat.tleLine1 = tleLine1;
+        sat.tleLine2 = tleLine2;
+        sat.updatedAt = nowIso();
+        updated += 1;
+      }
+    }
+
+    if (updated > 0) writeRaw(K.satellites, satellites);
+
+    const failures = results.filter((r) => r.status === 'rejected').length;
+    if (failures > 0) {
+      // eslint-disable-next-line no-console
+      console.info(`[api-local] CelesTrak background refresh: ${updated} updated, ${failures} failed`);
+    }
+  });
 }
 
 // ─── Stations ──────────────────────────────────────────────────────────────
