@@ -20,6 +20,7 @@
 12. [데이터 저장](#12-데이터-저장)
 13. [알려진 제한사항](#13-알려진-제한사항)
 14. [문제 해결](#14-문제-해결)
+15. [모바일 페이지 (/m/)](#15-모바일-페이지-m)
 
 ---
 
@@ -939,3 +940,97 @@ Pass Schedule의 행을 클릭하면 해당 pass 시점으로 카메라가 이�
 1. `data/` 디렉토리 쓰기 권한 확인
 2. 포트 3001이 사용 중인지 확인: `lsof -i :3001` (Mac/Linux) 또는 `netstat -ano | findstr 3001` (Windows)
 3. Node.js 18 이상인지 확인: `node --version`
+
+---
+
+## 15. 모바일 페이지 (/m/)
+
+### 15.1 개요
+
+`npm run build:demo` 로 생성되는 정적 데모 빌드는 **모바일 전용 페이지 `/m/`** 를 함께 제공합니다. 메인 페이지(`/`)는 Android/iOS User-Agent 를 감지해서 자동으로 `/m/` 로 리다이렉트하고, `?desktop=1` 쿼리 파라미터를 붙이면 모바일 기기에서도 데스크탑 페이지를 강제 진입할 수 있습니다 (선택은 `sessionStorage` 에 저장되어 같은 세션 동안 유지).
+
+![모바일 메인 — 2D 지도 위 ISS 궤적과 지상국 커버리지 원, peek 상태의 하단 시트](../images/mobile_main.png)
+
+모바일 페이지는 데스크탑의 궤도 렌더러(`src/visualization.js`)와 동일한 위성/지상국 데이터를 그대로 재사용합니다. 같은 브라우저 프로필 내에서는 `localStorage` 도 공유하므로, 데스크탑에서 fetch 한 TLE 가 모바일에서도 즉시 보입니다.
+
+### 15.2 화면 구성
+
+#### 상단 바
+
+| 컨트롤 | 동작 |
+|---|---|
+| **재생 / 일시정지** | Cesium clock 의 `shouldAnimate` 토글 |
+| **UTC 시계** | `MM/dd HH:mm:ssZ` 형식, 1 Hz 갱신 |
+| **연결 상태 점** | CelesTrak 연결 상태를 색상으로 표시 (`idle` 회색 / `checking` 노랑 / `online` 초록 / `offline` 빨강 / `fetching` 청록). 탭하면 즉시 Check Connection 실행 |
+| **2D / 3D 토글** | 현재 모드 라벨 표시, 탭하면 0.5 초 morph |
+| **시트 토글** | 하단 시트의 다음 snap point 로 순환 (peek → half → full → peek) |
+
+#### 하단 시트 (Bottom Sheet)
+
+세 단계 snap point — **peek (96 px)**, **half (40 dvh)**, **full (상단 바 56 px 아래까지)** — 로 드래그 / 탭 전환됩니다. full 상태에서도 상단 바를 절대 가리지 않도록 `max-height` 가 56 px 만큼 보정됩니다.
+
+시트 안에는 다음 섹션이 위에서 아래로 배치됩니다.
+
+##### PLAYBACK
+실시간 / 배속 컨트롤. **1× / 10× / 60× / 360×** pill 을 탭해서 배속을 변경합니다. 데스크탑 Playback Bar 와 동일한 시계 (`viewer.clock`) 를 공유.
+
+##### Reference Time (UTC)
+임의 UTC 시점 기준으로 시각화하려면 datetime 입력 + **Apply**. **NOW** 는 라이브 모드 복귀. 데스크탑 Reference Time 컨트롤과 동일한 의미.
+
+##### CONNECTION & TLE
+
+![모바일 설정창 — 시트 fully expanded, Playback / Reference Time / Connection & TLE (Offline) / Satellites / Focused TLE / Next Passes](../images/mobile_configuration.png)
+
+| 컨트롤 | 동작 |
+|---|---|
+| **Check Connection** (또는 상단 바 점 탭) | CelesTrak 에 GET 요청 후 상태 표시 |
+| **Refresh focused** | 현재 focused 위성의 TLE 만 다시 fetch |
+| **Fetch all** | NORAD ID 가 있는 모든 active 위성의 TLE 를 batch fetch (동시 3개, `AbortController` 로 취소 가능) |
+| **Cancel** | 진행 중인 batch fetch 즉시 중단 |
+
+batch 진행 중에는 `N / total` 진척도와 누적 에러 카운트가 표시됩니다. 각 위성 chip 에는 fetch 상태별 색상 띠가 표시됩니다 (`pending` 노랑 / `success` 3 초 초록 / `error` 5 초 빨강).
+
+**Offline 시**: 위 스크린샷처럼 빨간 점 + `Offline` 뱃지 + `Cannot reach CelesTrak — check your internet` 메시지가 표시됩니다. CelesTrak 점검 또는 네트워크 차단 시 발생. 버튼은 여전히 탭 가능하지만 동일한 offline 오류를 보고합니다.
+
+##### SATELLITES
+preset 위성 chip 목록 (그룹 별 정렬). 색상 점 + 이름. 탭하면 해당 위성이 **focused** 가 되어 궤적이 그려지고 Next Passes 가 계산됩니다. 다시 탭하면 해제.
+
+##### FOCUSED TLE
+현재 focused 위성의 NORAD, group, 그리고 line0 / line1 / line2 TLE (read-only). 모바일에서 TLE 편집 UI 는 제공하지 않으며, 편집은 데스크탑 Configuration 탭에서 합니다.
+
+##### NEXT PASSES
+focused 위성의 다가오는 pass 목록 (지상국 별 AOS / LOS / Max Elevation). 데스크탑 Pass Schedule 패널과 동일한 SGP4 계산 엔진.
+
+### 15.3 2D / 3D 모드
+
+![모바일 3D — 동일 장면이 3D 글로브로 morph 된 상태, ISS 궤적 + 지상국 커버리지 원](../images/mobile_3d.png)
+
+상단 바의 **2D / 3D** 버튼으로 즉시 전환. 모바일 기본은 2D (저전력 GPU 친화). 전환 시 `viewer.scene.morphComplete` 이벤트에서 `applySceneMode(viewer)` 가 호출되어 모드별 polyline (taper2d / taper3d / nadir line / 3D-only 마커) visibility 가 자동으로 갱신됩니다 — 데스크탑과 동일한 동작.
+
+### 15.4 모바일 전용 렌더링 튜닝
+
+| 항목 | 값 / 동작 |
+|---|---|
+| 기본 scene mode | **2D** (저전력 GPU 부담 최소화) |
+| `resolutionScale` (low-end, cores ≤ 4) | 0.75 |
+| `resolutionScale` (mid-range / high-end) | 1.0 (네이티브 해상도) |
+| `scene.msaaSamples` (low-end) | 2 |
+| `scene.msaaSamples` (mid-range 이상) | 4 |
+| `scene.msaaSamples` (Firefox) | 1 강제 (upstream MSAA artifact) |
+| Globe `maximumScreenSpaceError` | **2** |
+| Globe `tileCacheSize` | **100** |
+| Globe `preloadSiblings` / `preloadAncestors` | false / true |
+| Fog / atmosphere / sun / moon | 모두 off |
+| `requestRenderMode` | on, `maximumRenderTimeChange = 1/30` (재생 중 평균 ~30 FPS 캡) |
+| Ground-station coverage 원 outline | 2 px (데스크탑 3 px) |
+| WebGL `powerPreference` | `'low-power'` |
+
+`requestRenderMode` + 30 FPS 캡 덕분에 위 해상도/MSAA 를 올려도 실제 GPU 부담은 일시적입니다. 저사양 phone 에서 발열/배터리 문제가 생기면 `pickResolutionScale` 의 low-end 분기를 0.5 로, `pickMsaaSamples` 의 low-end 분기를 1 로 한 단계 내릴 수 있습니다 (`src/mobile/cesium-config.js`).
+
+### 15.5 알려진 동작 / 제한
+
+- 데이터는 데스크탑과 동일한 `localStorage` 를 공유합니다 — 같은 브라우저 프로필 안에서는 데스크탑에서 한 fetch 결과가 모바일에 즉시 반영됩니다.
+- 모바일에는 **Configuration UI 가 없습니다**. 위성 / 지상국 / 안테나 추가 · 삭제는 데스크탑 (`?desktop=1`) 에서 합니다.
+- 모바일에는 **녹화 (Recording) 기능이 없습니다** — 캡처 surface 선택 다이얼로그가 phone 에서 신뢰성 있게 작동하지 않고, `preserveDrawingBuffer` 도 false 로 두어 메모리를 아낍니다.
+- 모바일에는 **Track 버튼이 없습니다** — phone WebGL 컨텍스트에서 `viewer.trackedEntity` + `SampledPositionProperty` 조합이 불안정해서 비활성화. focused 위성으로 카메라 이동은 Visualize 시 자동 1회 수행.
+- 모바일 페이지는 **자체 Auto Refresh 토글이 없습니다**. CelesTrak 백그라운드 갱신은 첫 페이지 로드 시 한 번 시도하고, 사용자가 명시적으로 `Refresh focused` / `Fetch all` 을 누를 때 다시 시도합니다.

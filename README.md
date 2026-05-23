@@ -41,6 +41,11 @@ Multi-satellite 3D/2D orbit visualization, automatic pass-schedule computation a
 - **Antenna Management** — Hierarchical station → antenna → satellite mapping with free-text antenna types and primary/backup role assignment
 - **Persistent Storage** — Express + SQLite backend; all data survives browser refresh
 
+### Mobile companion
+- **Phone-optimized `/m/` page** — Reuses the desktop orbit renderer behind a low-power viewer config (2D-default, requestRenderMode, MSAA/DPR tuned per device). Auto-redirected from `/` on Android/iOS user agents
+- **Bottom-sheet UI** — Three-snap-point drag panel (peek / half / full) with Playback, Reference Time, Connection & TLE, Satellites, Focused TLE, and Next Passes sections
+- **Touch-first Connection & TLE controls** — Check Connection, Refresh focused, and Fetch all (batched concurrency-3 with abort), driven by the same CelesTrak code path as the desktop build
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -91,6 +96,26 @@ npm run preview:demo
 `build:demo` uses `cross-env` to set `VITE_BACKEND=local VITE_BASE=./` for you — running plain `npm run build` produces the self-hosted desktop bundle instead and the mobile entry will try to call `/api/*` (502s with no backend), so always use `build:demo` for the static-only deploy.
 
 The demo build has no Node.js or SQLite dependency at runtime — `dist/` is just static HTML/JS/CSS/textures and can be served from any static host (GitHub Pages, Netlify, Cloudflare Pages, S3, …). The relative-base build means you don't have to know the deploy URL at build time.
+
+### Mobile entry (`/m/`)
+
+The same demo build also ships a phone-optimized companion at `/m/`. The desktop landing page (`/`) detects Android/iOS user agents and auto-redirects there; `?desktop=1` forces the desktop entry from a phone (and is remembered in `sessionStorage` for the rest of the session). Both entries share the same `localStorage`, so a TLE fetched on the desktop is immediately visible on the mobile page in the same browser profile.
+
+![Mobile main view — 2D world map centered on Asia/Pacific with the ISS orbit trail, ground-station coverage rings, and the bottom sheet in its peek state showing playback speed pills](images/mobile_main.png)
+
+The mobile entry reuses the desktop orbit renderer (`src/visualization.js`) and the same satellite/ground-station data, so the propagation, the trail tapering, and the coverage geometry all match the desktop build. What it ships of its own is a touch-first shell:
+
+- **Top bar** — play/pause, UTC clock, a CelesTrak connection-status dot (tap to run a check), a 2D / 3D scene toggle, and a sheet button.
+- **Bottom sheet** — three drag snap points (peek / half / full) that always clear the top bar; sections inside are PLAYBACK, Reference Time (UTC), CONNECTION & TLE (Check / Refresh focused / Fetch all with abort), SATELLITES (one chip per preset), FOCUSED TLE (read-only line0/line1/line2 card), and NEXT PASSES.
+- **Viewer config** — 2D default, `resolutionScale` picked from CPU cores + DPR (0.75 on low-end phones, 1.0 from mid-range up so most devices render at the native browser resolution), MSAA 2 or 4 by device class (Firefox forced to 1 for an upstream artifact), fog / atmosphere / sun / moon off, `tileCacheSize: 100`, `maximumScreenSpaceError: 2`, ground-station coverage rings drawn with a 2 px outline. `requestRenderMode` caps the average GPU duty to ~30 FPS during playback so the higher per-pixel detail still leaves interaction headroom.
+
+![Mobile 3D mode — same scene morphed to the 3D globe; ISS trail and ground-station coverage rings render exactly like the desktop 3D build](images/mobile_3d.png)
+
+Tapping the **2D / 3D** button morphs the scene over 0.5 s; entity visibility (taper bands, nadir line, 3D-only markers) is re-applied on every `morphComplete` event so the orbit trail stays visible across mode switches.
+
+![Mobile configuration — bottom sheet fully expanded, exposing Playback, Reference Time, an Offline-state Connection & TLE block, the Satellites chip list with ISS focused, the read-only Focused TLE card, and the Next Passes section header](images/mobile_configuration.png)
+
+Pulling the sheet handle to the top expands every section at once. The screenshot above also shows the **Offline** branch of CONNECTION & TLE: when the device cannot reach CelesTrak (firewall, captive portal, CelesTrak maintenance), the status dot turns red and an inline error banner appears under the buttons; the buttons stay tappable but report the same offline error on retry. The mobile build does not ship the Configuration tab or the screen-recording feature — TLE edits, new satellites, new ground stations, and new antennas are still made on the desktop entry.
 
 ## Project Structure
 
