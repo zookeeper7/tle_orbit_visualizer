@@ -12,21 +12,21 @@ describe('pickResolutionScale', () => {
   });
 
   // Low-end mobile: DPR≥2 + ≤4 cores
-  it('low-end (2 cores, DPR 2) → 0.5', () => {
-    expect(pickResolutionScale({ hardwareConcurrency: 2, devicePixelRatio: 2 })).toBe(0.5);
+  it('low-end (2 cores, DPR 2) → 0.75', () => {
+    expect(pickResolutionScale({ hardwareConcurrency: 2, devicePixelRatio: 2 })).toBe(0.75);
   });
 
-  it('low-end (4 cores, DPR 3) → 0.5', () => {
-    expect(pickResolutionScale({ hardwareConcurrency: 4, devicePixelRatio: 3 })).toBe(0.5);
+  it('low-end (4 cores, DPR 3) → 0.75', () => {
+    expect(pickResolutionScale({ hardwareConcurrency: 4, devicePixelRatio: 3 })).toBe(0.75);
   });
 
   // Mid-range: >4 cores, DPR=2
-  it('mid-range (6 cores, DPR 2) → 0.75', () => {
-    expect(pickResolutionScale({ hardwareConcurrency: 6, devicePixelRatio: 2 })).toBe(0.75);
+  it('mid-range (6 cores, DPR 2) → 1.0', () => {
+    expect(pickResolutionScale({ hardwareConcurrency: 6, devicePixelRatio: 2 })).toBe(1.0);
   });
 
-  it('mid-range (8 cores, DPR 2) → 0.75', () => {
-    expect(pickResolutionScale({ hardwareConcurrency: 8, devicePixelRatio: 2 })).toBe(0.75);
+  it('mid-range (8 cores, DPR 2) → 1.0', () => {
+    expect(pickResolutionScale({ hardwareConcurrency: 8, devicePixelRatio: 2 })).toBe(1.0);
   });
 
   // High-end: >4 cores, DPR=3
@@ -35,8 +35,8 @@ describe('pickResolutionScale', () => {
   });
 
   // Defaults
-  it('missing hardwareConcurrency, DPR=2 → mid-range 0.75', () => {
-    expect(pickResolutionScale({ devicePixelRatio: 2 })).toBe(0.75);
+  it('missing hardwareConcurrency, DPR=2 → mid-range 1.0', () => {
+    expect(pickResolutionScale({ devicePixelRatio: 2 })).toBe(1.0);
   });
 
   it('missing devicePixelRatio (defaults to 1) → 1.0', () => {
@@ -49,20 +49,20 @@ describe('pickResolutionScale', () => {
 });
 
 describe('pickMsaaSamples', () => {
-  it('low-end (2 cores) → 1', () => {
-    expect(pickMsaaSamples({ hardwareConcurrency: 2 })).toBe(1);
+  it('low-end (2 cores) → 2', () => {
+    expect(pickMsaaSamples({ hardwareConcurrency: 2 })).toBe(2);
   });
 
-  it('mid-range (8 cores) → 2', () => {
-    expect(pickMsaaSamples({ hardwareConcurrency: 8 })).toBe(2);
+  it('mid-range (8 cores) → 4', () => {
+    expect(pickMsaaSamples({ hardwareConcurrency: 8 })).toBe(4);
   });
 
   it('Firefox UA forces 1 regardless of cores', () => {
     expect(pickMsaaSamples({ hardwareConcurrency: 8, userAgent: 'Mozilla/5.0 Firefox/120.0' })).toBe(1);
   });
 
-  it('no input → mid-range default (2)', () => {
-    expect(pickMsaaSamples()).toBe(2);
+  it('no input → mid-range default (4)', () => {
+    expect(pickMsaaSamples()).toBe(4);
   });
 });
 

@@ -33,19 +33,23 @@ const MAP_MODE_2D_ROTATE = 1;
  * In either case there is no "free" DPR multiplier on top of the
  * resolutionScale, so dialing scale below 1.0 just makes the canvas look
  * pixelated for no real perf win. Phones with DPR ≥ 2 then fall through
- * to the cores/DPR matrix that picks 0.5 / 0.75 / 1.0.
+ * to the cores/DPR matrix that picks 0.75 / 1.0.
+ *
+ * The mid-range (>4 cores, DPR=2) tier renders at the native browser
+ * resolution because requestRenderMode caps the average GPU duty cycle
+ * to whatever the playback rate demands, so the perf headroom is in the
+ * MSAA / globe-detail knobs rather than in undersampling the canvas.
  *
  * @param {{ hardwareConcurrency?: number, devicePixelRatio?: number }} [input]
- * @returns {number} 0.5 / 0.75 / 1.0
+ * @returns {number} 0.75 / 1.0
  */
 export function pickResolutionScale({ hardwareConcurrency, devicePixelRatio } = {}) {
   const cores = Number.isFinite(hardwareConcurrency) ? hardwareConcurrency : 6;
   const dpr = Number.isFinite(devicePixelRatio) ? devicePixelRatio : 1;
 
   if (dpr <= 1) return 1.0;                    // desktop / DevTools mobile mode
-  if (cores <= 4) return 0.5;                  // low-end mobile
-  if (dpr >= 3) return 1.0;                    // high-end retina (iPhone Pro)
-  return 0.75;                                 // mid-range mobile default
+  if (cores <= 4) return 0.75;                 // low-end mobile (was 0.5)
+  return 1.0;                                  // mid-range and high-end mobile
 }
 
 /**
@@ -53,13 +57,14 @@ export function pickResolutionScale({ hardwareConcurrency, devicePixelRatio } = 
  * Cesium so it is always forced to 1 there.
  *
  * @param {{ hardwareConcurrency?: number, userAgent?: string }} [input]
- * @returns {number} 1 or 2
+ * @returns {number} 1 / 2 / 4
  */
 export function pickMsaaSamples({ hardwareConcurrency, userAgent } = {}) {
   const ua = userAgent || '';
   if (/firefox/i.test(ua)) return 1;
   const cores = Number.isFinite(hardwareConcurrency) ? hardwareConcurrency : 6;
-  return cores <= 4 ? 1 : 2;
+  if (cores <= 4) return 2;                    // low-end mobile (was 1)
+  return 4;                                    // mid-range and up (was 2)
 }
 
 /**
@@ -135,11 +140,13 @@ export function applyMobileViewerTweaks(viewer, { resolutionScale, msaaSamples }
     viewer.scene.postProcessStages.fxaa.enabled = false;
   }
 
-  // Globe
+  // Globe — tighter screen-space error and a larger tile cache give a
+  // noticeably crisper map at typical phone pinch-zoom distances; both
+  // costs are bounded by requestRenderMode + the global resolutionScale.
   const g = viewer.scene.globe;
   if (g) {
-    g.maximumScreenSpaceError = 4;
-    g.tileCacheSize = 50;
+    g.maximumScreenSpaceError = 2;             // was 4 — half the tile coarseness
+    g.tileCacheSize = 100;                     // was 50 — fewer re-loads on pan
     g.preloadSiblings = false;
     g.preloadAncestors = true;
     g.enableLighting = false;
