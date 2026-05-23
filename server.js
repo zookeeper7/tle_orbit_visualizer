@@ -915,6 +915,13 @@ function seedDefaults() {
     satTxn();
   }
 
+  // Fire-and-forget: try to upgrade every preset's TLE with the live one
+  // from CelesTrak. The placeholder values are already in the table so
+  // the API is fully usable immediately; this just refreshes the data
+  // in the background. Runs on every server start so a long-lived
+  // deployment stays current.
+  refreshPresetTlesFromCelesTrak();
+
   // Seed stations if table is empty
   const stationCount = db.prepare('SELECT COUNT(*) AS cnt FROM stations').get().cnt;
   if (stationCount > 0) return;
@@ -968,6 +975,72 @@ function seedDefaults() {
   });
 
   seedTxn();
+}
+
+/**
+ * Background refresh of every PRESET satellite's TLE from CelesTrak.
+ *
+ * Runs on every server start, NOT just on the first seed — that way a
+ * long-lived production deployment stays current even when the user
+ * never clicks "Fetch All TLEs" in the UI. Failures are swallowed
+ * (logged) so an offline server still serves the placeholder data.
+ *
+ * Uses Node's native fetch (Node 18+). All 11 PRESET requests fire in
+ * parallel; CelesTrak handles the small burst without complaint.
+ */
+async function refreshPresetTlesFromCelesTrak() {
+  const presetEntries = Object.entries(PRESETS).filter(([, p]) => p && p.noradId);
+  if (presetEntries.length === 0) return;
+
+  const updateStmt = db.prepare(`
+    UPDATE satellites
+    SET tle_line0 = ?, tle_line1 = ?, tle_line2 = ?, updated_at = ?
+    WHERE id = ?
+  `);
+
+  const results = await Promise.allSettled(
+    presetEntries.map(async ([id, preset]) => {
+      const tleText = await fetchTleFromCelesTrak(preset.noradId);
+      return { id, tleText };
+    }),
+  );
+
+  let updated = 0;
+  let failed = 0;
+  const nowIso = new Date().toISOString();
+  for (const result of results) {
+    if (result.status !== 'fulfilled') { failed += 1; continue; }
+    const { id, tleText } = result.value;
+    const lines = tleText.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (lines.length < 2) { failed += 1; continue; }
+    const line0 = lines.length === 3 ? lines[0] : '';
+    const line1 = lines.length === 3 ? lines[1] : lines[0];
+    const line2 = lines.length === 3 ? lines[2] : lines[1];
+    try {
+      const r = updateStmt.run(line0, line1, line2, nowIso, id);
+      if (r.changes > 0) updated += 1;
+    } catch (_) {
+      failed += 1;
+    }
+  }
+  console.log(`[seed] CelesTrak background refresh: ${updated} updated, ${failed} failed`);
+}
+
+async function fetchTleFromCelesTrak(noradId) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const res = await fetch(
+      `https://celestrak.org/NORAD/elements/gp.php?CATNR=${noradId}&FORMAT=TLE`,
+      { signal: controller.signal },
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = (await res.text()).trim();
+    if (!text || text.startsWith('No GP')) throw new Error(`No TLE for NORAD ${noradId}`);
+    return text;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function seedGroupsIfEmpty() {
