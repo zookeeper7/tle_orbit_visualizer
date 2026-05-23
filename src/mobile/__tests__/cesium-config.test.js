@@ -2,7 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { pickResolutionScale, pickMsaaSamples, buildMobileViewerOptions } from '../cesium-config.js';
 
 describe('pickResolutionScale', () => {
-  // Low-end: ≤4 cores
+  // Desktop / DevTools mobile (DPR=1) — always full
+  it('DPR=1 with 8 cores (desktop or DevTools mobile mode) → 1.0', () => {
+    expect(pickResolutionScale({ hardwareConcurrency: 8, devicePixelRatio: 1 })).toBe(1.0);
+  });
+
+  it('DPR=1 with 2 cores → 1.0 (no DPR multiplier to hide low-res)', () => {
+    expect(pickResolutionScale({ hardwareConcurrency: 2, devicePixelRatio: 1 })).toBe(1.0);
+  });
+
+  // Low-end mobile: DPR≥2 + ≤4 cores
   it('low-end (2 cores, DPR 2) → 0.5', () => {
     expect(pickResolutionScale({ hardwareConcurrency: 2, devicePixelRatio: 2 })).toBe(0.5);
   });
@@ -11,7 +20,7 @@ describe('pickResolutionScale', () => {
     expect(pickResolutionScale({ hardwareConcurrency: 4, devicePixelRatio: 3 })).toBe(0.5);
   });
 
-  // Mid-range: >4 cores, DPR ≥2
+  // Mid-range: >4 cores, DPR=2
   it('mid-range (6 cores, DPR 2) → 0.75', () => {
     expect(pickResolutionScale({ hardwareConcurrency: 6, devicePixelRatio: 2 })).toBe(0.75);
   });
@@ -20,22 +29,22 @@ describe('pickResolutionScale', () => {
     expect(pickResolutionScale({ hardwareConcurrency: 8, devicePixelRatio: 2 })).toBe(0.75);
   });
 
-  // High-end: >4 cores, DPR ≥3
+  // High-end: >4 cores, DPR=3
   it('high-end (8 cores, DPR 3) → 1.0', () => {
     expect(pickResolutionScale({ hardwareConcurrency: 8, devicePixelRatio: 3 })).toBe(1.0);
   });
 
-  // Defaults: missing values
-  it('missing hardwareConcurrency → defaults to mid-range', () => {
+  // Defaults
+  it('missing hardwareConcurrency, DPR=2 → mid-range 0.75', () => {
     expect(pickResolutionScale({ devicePixelRatio: 2 })).toBe(0.75);
   });
 
-  it('missing devicePixelRatio → defaults to 1', () => {
-    expect(pickResolutionScale({ hardwareConcurrency: 8 })).toBe(0.75);
+  it('missing devicePixelRatio (defaults to 1) → 1.0', () => {
+    expect(pickResolutionScale({ hardwareConcurrency: 8 })).toBe(1.0);
   });
 
-  it('no input → mid-range default', () => {
-    expect(pickResolutionScale()).toBe(0.75);
+  it('no input → DPR=1 fallback → 1.0', () => {
+    expect(pickResolutionScale()).toBe(1.0);
   });
 });
 

@@ -294,19 +294,29 @@ async function toggleSatellite(satId, makeFocused) {
   // Either not on yet, or on but a different chip is focused.
   if (!alreadyOn) {
     let satrec;
+    let positions;
     try {
       satrec = parseTLE(sat.tle);
-      const { positions } = propagateOrbit(satrec, {
+      const result = propagateOrbit(satrec, {
         pastOrbits: 1,
         futureOrbits: 1.5,
         pointsPerOrbit: 90,
       });
+      positions = result.positions;
       addMobileSatellite(viewer, sat.id, sat.name, positions, sat.color);
       selectedSatIds.add(sat.id);
     } catch (err) {
       showToast('Bad TLE for ' + sat.name + ': ' + (err?.message || err));
       return;
     }
+
+    // Cesium's SampledPositionProperty + the trail CallbackProperty both
+    // need the viewer clock to be inside the position-sample availability
+    // window AND actively advancing — otherwise the trail returns empty
+    // slices and only the satellite point shows up. Pin the clock to the
+    // freshly-propagated window every time a satellite is added so
+    // subsequent satellites can't desync it.
+    setClockForPositions(positions);
 
     if (makeFocused) {
       focusedSatId = sat.id;
@@ -351,11 +361,61 @@ async function onFocusedSatelliteChanged(sat, satrec) {
   // Persist focused id so refresh restores it.
   try { await putSetting('mobileFocusedSat', { satId: sat.id }); } catch (_) {}
 
-  // Soft camera fly to the satellite.
+  flyCameraToSatellite(sat.id);
+}
+
+/**
+ * Cesium's viewer.flyTo(entity) auto-picks a distance that, on a globe with
+ * the atmosphere/lighting disabled, often lands too close to see the trail.
+ * Instead we read the satellite's current geodetic position and frame a
+ * wide window around it — works in both SCENE2D and SCENE3D.
+ */
+function flyCameraToSatellite(satId) {
+  if (!viewer) return;
+  const ent = viewer.entities.getById(`m-sat-${satId}`);
+  if (!ent || !ent.position) return;
+
   try {
-    const ent = viewer.entities.getById(`m-sat-${sat.id}`);
-    if (ent) viewer.flyTo(ent, { duration: 0.6 });
-  } catch (_) {}
+    const cart = ent.position.getValue(viewer.clock.currentTime);
+    if (!cart) return;
+    const carto = Cesium.Cartographic.fromCartesian(cart);
+    const lon = Cesium.Math.toDegrees(carto.longitude);
+    const lat = Cesium.Math.toDegrees(carto.latitude);
+    // Roughly a continent-scale window so both the satellite and a chunk
+    // of its trail are visible at once.
+    viewer.camera.flyTo({
+      destination: Cesium.Rectangle.fromDegrees(lon - 45, lat - 30, lon + 45, lat + 30),
+      duration: 0.6,
+    });
+  } catch (_) {
+    // Fall back to entity-relative fly with an explicit altitude so the
+    // camera at least doesn't end up inside the planet.
+    try {
+      viewer.flyTo(ent, {
+        duration: 0.6,
+        offset: new Cesium.HeadingPitchRange(0, -Math.PI / 2, 12_000_000),
+      });
+    } catch (_) { /* viewer torn down */ }
+  }
+}
+
+/**
+ * Pin Cesium's clock to the freshly-propagated position window AND restart
+ * playback at "now". Without this the SampledPositionProperty falls outside
+ * the availability window (or the clock isn't advancing) and trails render
+ * empty — only the point shows.
+ */
+function setClockForPositions(positions) {
+  if (!viewer || !Array.isArray(positions) || positions.length === 0) return;
+  const start = Cesium.JulianDate.fromDate(positions[0].date);
+  const stop = Cesium.JulianDate.fromDate(positions[positions.length - 1].date);
+  viewer.clock.startTime = start.clone();
+  viewer.clock.stopTime = stop.clone();
+  viewer.clock.currentTime = Cesium.JulianDate.now();
+  viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+  viewer.clock.multiplier = 1;
+  viewer.clock.shouldAnimate = true;
+  viewer.scene.requestRender();
 }
 
 // ─── Focused TLE card ─────────────────────────────────────────────────────

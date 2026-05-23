@@ -19,10 +19,13 @@ import * as Cesium from 'cesium';
 
 const LABEL_OUTLINE = new Cesium.Color(0.02, 0.02, 0.06, 0.9);
 
-// Three thin bands radiating outward from the satellite.
-const TAPER_WIDTHS_2D = [1.6, 1.0, 0.5];
-const TAPER_WIDTHS_3D = [2.0, 1.3, 0.7];
-const TAPER_ALPHAS = [1.0, 0.55, 0.22];
+// Three thin bands radiating outward from the satellite. Alphas are tuned
+// to stay clearly legible on a phone screen at the default zoom (a 2D
+// projection ~10⁷ m wide); the third band at 0.22 was too faint to see
+// reliably so it is bumped to 0.35.
+const TAPER_WIDTHS_2D = [1.8, 1.2, 0.6];
+const TAPER_WIDTHS_3D = [2.2, 1.4, 0.8];
+const TAPER_ALPHAS = [1.0, 0.65, 0.35];
 
 // Wall-time throttle (ms) for tapered-trail cache invalidation.
 const TAPER_REFRESH_MS = 100;

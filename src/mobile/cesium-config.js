@@ -28,6 +28,13 @@ const MAP_MODE_2D_ROTATE = 1;
  * Pick a resolutionScale based on the device's CPU cores and pixel density.
  * Lower scale = fewer rendered pixels = lower GPU/battery.
  *
+ * Rationale for the DPR branch first: a DPR of 1 means we're either on a
+ * desktop monitor (incl. DevTools mobile emulation) or a very old phone.
+ * In either case there is no "free" DPR multiplier on top of the
+ * resolutionScale, so dialing scale below 1.0 just makes the canvas look
+ * pixelated for no real perf win. Phones with DPR ≥ 2 then fall through
+ * to the cores/DPR matrix that picks 0.5 / 0.75 / 1.0.
+ *
  * @param {{ hardwareConcurrency?: number, devicePixelRatio?: number }} [input]
  * @returns {number} 0.5 / 0.75 / 1.0
  */
@@ -35,9 +42,10 @@ export function pickResolutionScale({ hardwareConcurrency, devicePixelRatio } = 
   const cores = Number.isFinite(hardwareConcurrency) ? hardwareConcurrency : 6;
   const dpr = Number.isFinite(devicePixelRatio) ? devicePixelRatio : 1;
 
-  if (cores <= 4) return 0.5;                  // low-end
-  if (cores > 4 && dpr >= 3) return 1.0;       // high-end retina
-  return 0.75;                                 // mid-range default
+  if (dpr <= 1) return 1.0;                    // desktop / DevTools mobile mode
+  if (cores <= 4) return 0.5;                  // low-end mobile
+  if (dpr >= 3) return 1.0;                    // high-end retina (iPhone Pro)
+  return 0.75;                                 // mid-range mobile default
 }
 
 /**
