@@ -38,6 +38,7 @@
   <meta name="theme-color" content="#060610">
   <meta name="color-scheme" content="dark">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>TLE Visualizer — Mobile</title>
   <link rel="icon" type="image/svg+xml" href="../favicon.svg">
@@ -47,7 +48,9 @@
   <div id="mCesium"></div>
 
   <header id="mTopBar">
-    <h1 class="m-title">TLE Visualizer</h1>
+    <button type="button" id="mPlayPause" class="m-icon-btn m-play-btn" aria-label="Pause playback" aria-pressed="true">⏸</button>
+    <span id="mClockText" class="m-clock" aria-live="off">--/-- --:--:--Z</span>
+    <button type="button" id="mLiveBadge" class="m-live-badge" hidden></button>
     <div class="m-top-actions">
       <button type="button" id="mModeToggle" class="m-icon-btn" aria-label="Toggle 2D/3D">2D</button>
       <button type="button" id="mSheetToggle" class="m-icon-btn" aria-label="Toggle satellite panel">☰</button>
@@ -57,6 +60,24 @@
   <section id="mSheet" class="sheet-peek" aria-label="Satellite panel">
     <button type="button" id="mSheetHandle" class="m-sheet-handle" aria-label="Drag sheet"></button>
     <div class="m-sheet-body">
+      <section class="m-section" id="mPlaybackSection">
+        <h2 class="m-section-title">Playback</h2>
+        <div class="m-speed-row" role="group" aria-label="Playback speed">
+          <button type="button" data-speed="1"   class="m-speed-pill" aria-pressed="true">1×</button>
+          <button type="button" data-speed="10"  class="m-speed-pill" aria-pressed="false">10×</button>
+          <button type="button" data-speed="60"  class="m-speed-pill" aria-pressed="false">60×</button>
+          <button type="button" data-speed="360" class="m-speed-pill" aria-pressed="false">360×</button>
+        </div>
+        <div class="m-reftime-row">
+          <label class="m-reftime-label" for="mRefTime">Reference Time (UTC)</label>
+          <div class="m-reftime-controls">
+            <input type="datetime-local" id="mRefTime" step="60">
+            <button type="button" id="mApplyRef" class="m-icon-btn m-icon-btn-compact">Apply</button>
+            <button type="button" id="mNowBtn" class="m-icon-btn m-icon-btn-compact">NOW</button>
+          </div>
+        </div>
+      </section>
+
       <section class="m-section" id="mSatSection">
         <h2 class="m-section-title">Satellites</h2>
         <div id="mSatList" class="m-chip-list" role="group" aria-label="Satellite selector"></div>

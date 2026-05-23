@@ -2,15 +2,28 @@
  * Mobile entry-point app shell.
  *
  * Scope per design decision: VIEWER ONLY.
- *   - Satellite multi-select chips (each toggles its orbit on/off)
- *   - Focused TLE card (read-only) for the most recently chosen satellite
+ *   - Satellite multi-select chips (each toggles its orbit on/off; most
+ *     recently tapped chip becomes the "focused" satellite that drives
+ *     the TLE card and pass list)
+ *   - Focused TLE card (read-only)
  *   - Next-5 pass cards (read-only) for the focused satellite across all stations
- *   - 2D ⇄ 3D mode toggle
- *   - Track FAB that locks the camera onto the focused satellite
+ *   - 2D / 3D mode toggle
+ *   - Playback controls: Play/Pause, 4 speed pills (1×/10×/60×/360×),
+ *     UTC clock display, Reference Time picker + Apply, NOW button
  *
  * NOT included on mobile (by design):
  *   - Schedule Manager / Timeline Gantt / Configuration CRUD / Recording
- *   - CelesTrak fetch, Auto-refresh, Reference time picker, Past/future sliders
+ *   - CelesTrak fetch, Auto-refresh
+ *   - viewer.trackedEntity (Cesium's frustum culler crashes on
+ *     SampledPositionProperty + trackedEntity bindings — desktop sidesteps
+ *     this with a custom preRender tracker; mobile just doesn't ship the
+ *     follow-camera affordance at all)
+ *
+ * Visualization reuses the desktop renderer (`src/visualization.js`)
+ * verbatim — the previous mobile-only renderer was harder to debug and
+ * never reliably rendered the orbit trail. The downside is that toggling
+ * any satellite re-runs the full clear + re-add of every selected
+ * satellite, but with ≤ 12 preset satellites this is unmeasurably fast.
  *
  * Backend: same VITE_BACKEND switch as desktop. Demo build resolves to
  * the localStorage adapter, so the mobile visitor shares any state they
@@ -34,35 +47,34 @@ import {
 import { parseTLE, propagateOrbit } from '../orbit.js';
 import { computePasses } from '../pass-prediction.js';
 import {
+  addSatelliteVisualization,
+  clearVisualization,
+} from '../visualization.js';
+import {
   buildMobileViewerOptions,
   pickResolutionScale,
   pickMsaaSamples,
   applyMobileViewerTweaks,
 } from './cesium-config.js';
 import { attachMobileLifecycle } from './lifecycle.js';
-import {
-  addMobileSatellite,
-  removeMobileSatellite,
-  addMobileGroundStations,
-} from './mobile-visualization.js';
+import { addMobileGroundStations } from './mobile-visualization.js';
 
 // ─── State ────────────────────────────────────────────────────────────────
 
 /** @type {Cesium.Viewer|null} */
 let viewer = null;
-/** Sorted satellites for the chip list. */
 let satellitesList = [];
-/** Sorted stations for pass computation + display. */
 let stationsList = [];
-/** Currently visible satellite ids (chip toggle state). */
 const selectedSatIds = new Set();
-/** Most recently chosen satellite — drives TLE card + pass list + Track FAB. */
 let focusedSatId = null;
-/** Cached propagation result for the focused satellite. */
-let focusedSatrec = null;
+
+/** null = live (clock follows wall-time), Date = locked epoch for replay. */
+let referenceDate = null;
+
 const SHEET_STATES = ['sheet-peek', 'sheet-half', 'sheet-full'];
 let sheetStateIdx = 0;
 let toastTimer = null;
+let clockDisplayHandle = null;
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────
 
@@ -88,9 +100,12 @@ async function bootstrap() {
 
   setupTopBar();
   setupSheet();
+  setupPlayback();
   renderSatChips();
   renderFocusedCard(null);
   renderPasses([]);
+  updatePlaybackUI();
+  startClockDisplayLoop();
 
   // Restore last focused satellite (if any).
   try {
@@ -186,6 +201,7 @@ function setupTopBar() {
   if (!modeBtn || !sheetBtn) return;
 
   modeBtn.addEventListener('click', () => {
+    if (!viewer) return;
     const is2D = viewer.scene.mode === Cesium.SceneMode.SCENE2D;
     if (is2D) {
       viewer.scene.morphTo3D(0.5);
@@ -216,6 +232,129 @@ function cycleSheetState() {
   sheet.classList.add(SHEET_STATES[sheetStateIdx]);
 }
 
+// ─── Playback (top-bar clock + sheet controls) ────────────────────────────
+
+function setupPlayback() {
+  const playBtn = document.getElementById('mPlayPause');
+  const nowBtn = document.getElementById('mNowBtn');
+  const speedPills = document.querySelectorAll('.m-speed-pill');
+  const refTimeInput = document.getElementById('mRefTime');
+  const applyRefBtn = document.getElementById('mApplyRef');
+  const liveBadge = document.getElementById('mLiveBadge');
+
+  if (playBtn) {
+    playBtn.addEventListener('click', () => {
+      if (!viewer) return;
+      const next = !viewer.clock.shouldAnimate;
+      viewer.clock.shouldAnimate = next;
+      viewer.scene.requestRender();
+      updatePlaybackUI();
+    });
+  }
+
+  for (const pill of speedPills) {
+    pill.addEventListener('click', () => {
+      if (!viewer) return;
+      const speed = Number(pill.dataset.speed);
+      if (!Number.isFinite(speed) || speed <= 0) return;
+      viewer.clock.multiplier = speed;
+      viewer.scene.requestRender();
+      updatePlaybackUI();
+    });
+  }
+
+  if (nowBtn) {
+    nowBtn.addEventListener('click', async () => {
+      if (!viewer) return;
+      referenceDate = null;
+      if (refTimeInput) refTimeInput.value = '';
+      await syncVisualization();
+      if (focusedSatId) {
+        const sat = satellitesList.find((s) => s.id === focusedSatId);
+        if (sat) {
+          try { computeAndRenderPasses(parseTLE(sat.tle)); } catch (_) {}
+        }
+      }
+      updatePlaybackUI();
+      showToast('Reset to live time');
+    });
+  }
+
+  if (applyRefBtn && refTimeInput) {
+    applyRefBtn.addEventListener('click', async () => {
+      const v = refTimeInput.value;
+      if (!v) { showToast('Pick a date and time first'); return; }
+      const d = new Date(v + 'Z');
+      if (Number.isNaN(d.getTime())) { showToast('Invalid date'); return; }
+      referenceDate = d;
+      await syncVisualization();
+      updatePlaybackUI();
+      showToast('Reference time set');
+    });
+  }
+
+  // Live badge is informational only; click resets to live just like NOW.
+  if (liveBadge) {
+    liveBadge.addEventListener('click', () => {
+      if (nowBtn) nowBtn.click();
+    });
+  }
+}
+
+function updatePlaybackUI() {
+  if (!viewer) return;
+
+  const playBtn = document.getElementById('mPlayPause');
+  if (playBtn) {
+    const playing = viewer.clock.shouldAnimate;
+    playBtn.textContent = playing ? '⏸' : '▶';
+    playBtn.setAttribute('aria-pressed', playing ? 'true' : 'false');
+    playBtn.setAttribute('aria-label', playing ? 'Pause playback' : 'Resume playback');
+  }
+
+  const currentMult = viewer.clock.multiplier;
+  const pills = document.querySelectorAll('.m-speed-pill');
+  for (const p of pills) {
+    const matches = Number(p.dataset.speed) === currentMult;
+    p.setAttribute('aria-pressed', matches ? 'true' : 'false');
+  }
+
+  const liveBadge = document.getElementById('mLiveBadge');
+  if (liveBadge) {
+    liveBadge.hidden = referenceDate == null;
+    if (referenceDate != null) {
+      liveBadge.textContent = 'Ref: ' + referenceDate.toISOString().slice(0, 16).replace('T', ' ') + 'Z';
+    }
+  }
+}
+
+/**
+ * Update the top-bar clock display via requestAnimationFrame instead of
+ * Cesium's clock.onTick — onTick only fires while shouldAnimate is true,
+ * but we want the display to reflect the current time even while paused.
+ */
+function startClockDisplayLoop() {
+  if (clockDisplayHandle != null) return;
+  const tick = () => {
+    const el = document.getElementById('mClockText');
+    if (el && viewer && viewer.clock && viewer.clock.currentTime) {
+      const d = Cesium.JulianDate.toDate(viewer.clock.currentTime);
+      el.textContent = formatClockShort(d);
+    }
+    clockDisplayHandle = requestAnimationFrame(tick);
+  };
+  clockDisplayHandle = requestAnimationFrame(tick);
+}
+
+function formatClockShort(d) {
+  const M = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const D = String(d.getUTCDate()).padStart(2, '0');
+  const H = String(d.getUTCHours()).padStart(2, '0');
+  const Mi = String(d.getUTCMinutes()).padStart(2, '0');
+  const S = String(d.getUTCSeconds()).padStart(2, '0');
+  return `${M}/${D} ${H}:${Mi}:${S}Z`;
+}
+
 // ─── Satellite chip list ──────────────────────────────────────────────────
 
 function renderSatChips() {
@@ -237,9 +376,7 @@ function renderSatChips() {
     chip.className = 'm-chip';
     chip.dataset.satId = sat.id;
     chip.setAttribute('aria-pressed', selectedSatIds.has(sat.id) ? 'true' : 'false');
-    if (sat.id === focusedSatId) {
-      chip.classList.add('m-chip-focused');
-    }
+    if (sat.id === focusedSatId) chip.classList.add('m-chip-focused');
 
     const dot = document.createElement('span');
     dot.className = 'm-chip-dot';
@@ -261,90 +398,127 @@ async function toggleSatellite(satId, makeFocused) {
 
   const alreadyOn = selectedSatIds.has(satId);
 
+  // 1. Plain toggle off (without focusing) — only used programmatically;
+  //    chip taps always pass makeFocused=true.
   if (alreadyOn && !makeFocused) {
-    // Plain toggle off
-    removeMobileSatellite(viewer, satId);
     selectedSatIds.delete(satId);
     if (focusedSatId === satId) {
       focusedSatId = null;
-      focusedSatrec = null;
       renderFocusedCard(null);
       renderPasses([]);
     }
+    await syncVisualization();
     renderSatChips();
     return;
   }
 
+  // 2. Tapping the already-focused chip again toggles it off.
   if (alreadyOn && makeFocused && focusedSatId === satId) {
-    // Same focused chip tapped again → toggle off
-    removeMobileSatellite(viewer, satId);
     selectedSatIds.delete(satId);
     focusedSatId = null;
-    focusedSatrec = null;
     renderFocusedCard(null);
     renderPasses([]);
+    await syncVisualization();
     renderSatChips();
     return;
   }
 
-  // Either not on yet, or on but a different chip is focused.
-  if (!alreadyOn) {
+  // 3. New addition OR already-on chip re-focused.
+  if (!alreadyOn) selectedSatIds.add(satId);
+  if (makeFocused) focusedSatId = satId;
+
+  await syncVisualization();
+
+  if (makeFocused) {
     let satrec;
-    let positions;
     try {
       satrec = parseTLE(sat.tle);
-      const result = propagateOrbit(satrec, {
-        pastOrbits: 1,
-        futureOrbits: 1.5,
-        pointsPerOrbit: 90,
-      });
-      positions = result.positions;
-      addMobileSatellite(viewer, sat.id, sat.name, positions, sat.color);
-      selectedSatIds.add(sat.id);
     } catch (err) {
       showToast('Bad TLE for ' + sat.name + ': ' + (err?.message || err));
+      selectedSatIds.delete(satId);
+      focusedSatId = null;
+      await syncVisualization();
+      renderSatChips();
       return;
     }
-
-    // Cesium's SampledPositionProperty + the trail CallbackProperty both
-    // need the viewer clock to be inside the position-sample availability
-    // window AND actively advancing — otherwise the trail returns empty
-    // slices and only the satellite point shows up. Pin the clock to the
-    // freshly-propagated window every time a satellite is added so
-    // subsequent satellites can't desync it.
-    setClockForPositions(positions);
-
-    if (makeFocused) {
-      focusedSatId = sat.id;
-      focusedSatrec = satrec;
-      await onFocusedSatelliteChanged(sat, satrec);
-    }
-  } else if (makeFocused) {
-    // Already on, just re-focus
-    try {
-      const satrec = parseTLE(sat.tle);
-      focusedSatId = sat.id;
-      focusedSatrec = satrec;
-      await onFocusedSatelliteChanged(sat, satrec);
-    } catch (err) {
-      showToast('Re-focus failed: ' + (err?.message || err));
-    }
+    renderFocusedCard(sat);
+    computeAndRenderPasses(satrec);
+    flyCameraToFocused();
+    try { await putSetting('mobileFocusedSat', { satId: sat.id }); } catch (_) {}
   }
 
   renderSatChips();
 }
 
-async function onFocusedSatelliteChanged(sat, satrec) {
-  renderFocusedCard(sat);
+/**
+ * Re-create the orbit visualization for every satellite currently in
+ * `selectedSatIds`, plus the ground stations. We use the desktop renderer
+ * (`addSatelliteVisualization`) because mobile-side rendering was unstable
+ * and the desktop version handles SCENE2D correctly.
+ *
+ * Desktop's `clearVisualization` removes its own ground-station entities too,
+ * so we re-add ours afterwards. The mobile ground-station registry is kept
+ * in a separate module-scope array so there's no cross-pollution.
+ */
+async function syncVisualization() {
+  if (!viewer) return;
 
-  // Compute next 5 passes within 24h (read-only).
+  clearVisualization(viewer);
+
+  let firstPositions = null;
+  for (const satId of selectedSatIds) {
+    const sat = satellitesList.find((s) => s.id === satId);
+    if (!sat) continue;
+    try {
+      const satrec = parseTLE(sat.tle);
+      const result = propagateOrbit(satrec, {
+        pastOrbits: 1,
+        futureOrbits: 1.5,
+        pointsPerOrbit: 120,
+        referenceDate: referenceDate || undefined,
+      });
+      addSatelliteVisualization(viewer, sat.name, result.positions, result.info, {}, sat.color);
+      if (!firstPositions) firstPositions = result.positions;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[mobile] failed to visualize', sat.id, err);
+    }
+  }
+
+  if (stationsList.length > 0) addMobileGroundStations(viewer, stationsList);
+
+  if (firstPositions) setClockForPositions(firstPositions);
+}
+
+function setClockForPositions(positions) {
+  if (!viewer || !Array.isArray(positions) || positions.length === 0) return;
+  const start = Cesium.JulianDate.fromDate(positions[0].date);
+  const stop = Cesium.JulianDate.fromDate(positions[positions.length - 1].date);
+  viewer.clock.startTime = start.clone();
+  viewer.clock.stopTime = stop.clone();
+  viewer.clock.currentTime = referenceDate
+    ? Cesium.JulianDate.fromDate(referenceDate)
+    : Cesium.JulianDate.now();
+  viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+  if (!Number.isFinite(viewer.clock.multiplier) || viewer.clock.multiplier === 0) {
+    viewer.clock.multiplier = 1;
+  }
+  viewer.clock.shouldAnimate = true;
+  viewer.scene.requestRender();
+}
+
+function computeAndRenderPasses(satrec) {
+  if (stationsList.length === 0) {
+    renderPasses([]);
+    return;
+  }
   try {
     const passes = computePasses(
       satrec,
       stationsList,
       new Date(),
       new Date(Date.now() + 24 * 3600 * 1000),
-      30, // 30 s step — faster than desktop's 10 s, fine for mobile display
+      30, // 30 s step — faster than desktop's 10 s, good enough for display
       { perAntenna: false },
     );
     renderPasses(passes.slice(0, 5));
@@ -352,27 +526,13 @@ async function onFocusedSatelliteChanged(sat, satrec) {
     renderPasses([]);
     showToast('Pass compute failed: ' + (err?.message || err));
   }
-
-  // Persist focused id so refresh restores it.
-  try { await putSetting('mobileFocusedSat', { satId: sat.id }); } catch (_) {}
-
-  flyCameraToSatellite(sat.id);
 }
 
-/**
- * Move the camera so the satellite is centred at a roughly continent-scale
- * altitude that shows a useful chunk of the orbit trail.
- *
- * We use Cartesian3.fromDegrees(lon, lat, 15_000_000) rather than a
- * Rectangle, because Rectangle.fromDegrees(lon-45, …, lon+45, …) wraps
- * past ±180° whenever the satellite is anywhere near the antimeridian,
- * which feeds Cesium a degenerate camera frame and trips
- * `createPotentiallyVisibleSet` with "Invalid array length". A point
- * destination is unconditional.
- */
-function flyCameraToSatellite(satId) {
-  if (!viewer) return;
-  const ent = viewer.entities.getById(`m-sat-${satId}`);
+function flyCameraToFocused() {
+  if (!viewer || !focusedSatId) return;
+  const sat = satellitesList.find((s) => s.id === focusedSatId);
+  if (!sat) return;
+  const ent = viewer.entities.values.find((e) => e.name === sat.name);
   if (!ent || !ent.position) return;
 
   try {
@@ -381,36 +541,12 @@ function flyCameraToSatellite(satId) {
     const carto = Cesium.Cartographic.fromCartesian(cart);
     const lon = Cesium.Math.toDegrees(carto.longitude);
     const lat = Cesium.Math.toDegrees(carto.latitude);
-
     if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
-
     viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(lon, lat, 15_000_000), // ~15,000 km up
+      destination: Cesium.Cartesian3.fromDegrees(lon, lat, 15_000_000),
       duration: 0.6,
     });
-  } catch (_) {
-    // Don't try a secondary flyTo — if the primary failed, the safest
-    // outcome is to leave the camera where it is.
-  }
-}
-
-/**
- * Pin Cesium's clock to the freshly-propagated position window AND restart
- * playback at "now". Without this the SampledPositionProperty falls outside
- * the availability window (or the clock isn't advancing) and trails render
- * empty — only the point shows.
- */
-function setClockForPositions(positions) {
-  if (!viewer || !Array.isArray(positions) || positions.length === 0) return;
-  const start = Cesium.JulianDate.fromDate(positions[0].date);
-  const stop = Cesium.JulianDate.fromDate(positions[positions.length - 1].date);
-  viewer.clock.startTime = start.clone();
-  viewer.clock.stopTime = stop.clone();
-  viewer.clock.currentTime = Cesium.JulianDate.now();
-  viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
-  viewer.clock.multiplier = 1;
-  viewer.clock.shouldAnimate = true;
-  viewer.scene.requestRender();
+  } catch (_) { /* leave camera where it is */ }
 }
 
 // ─── Focused TLE card ─────────────────────────────────────────────────────
@@ -469,9 +605,14 @@ function renderPasses(passes) {
   if (!passes || passes.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'm-pass-empty';
-    empty.textContent = focusedSatId
-      ? 'No passes in the next 24 hours.'
-      : 'Tap a satellite to see its next passes.';
+    if (!focusedSatId) {
+      empty.textContent = 'Tap a satellite to see its next passes.';
+    } else if (stationsList.length === 0) {
+      empty.textContent = 'No ground stations configured. Open the desktop site → Configuration → Ground Stations to add one.';
+    } else {
+      const n = stationsList.length;
+      empty.textContent = `No passes in the next 24 hours over ${n} station${n === 1 ? '' : 's'}.`;
+    }
     list.appendChild(empty);
     return;
   }
@@ -529,9 +670,7 @@ function showToast(msg) {
   toast.textContent = msg;
   toast.hidden = false;
   if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toast.hidden = true;
-  }, 3000);
+  toastTimer = setTimeout(() => { toast.hidden = true; }, 3000);
 }
 
 // Re-export for tests / debugging (no global pollution).
@@ -539,4 +678,5 @@ export const _internal = {
   get viewer() { return viewer; },
   get focusedSatId() { return focusedSatId; },
   get selectedSatIds() { return new Set(selectedSatIds); },
+  get referenceDate() { return referenceDate; },
 };

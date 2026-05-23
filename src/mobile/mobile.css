@@ -86,24 +86,50 @@ html, body {
   -webkit-backdrop-filter: blur(var(--glass-blur));
 }
 
-.m-title {
-  flex: 1;
-  margin: 0;
+.m-play-btn {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
   font-size: 14px;
+  flex-shrink: 0;
+}
+
+.m-clock {
+  flex: 1;
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  letter-spacing: -0.02em;
+}
+
+.m-live-badge {
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  color: #fbbf24;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-appearance: none;
+  appearance: none;
+  flex-shrink: 0;
 }
 
 .m-top-actions {
   display: flex;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .m-icon-btn {
-  min-width: 44px;
+  min-width: 40px;
   min-height: 36px;
   padding: 6px 10px;
   border-radius: var(--radius-sm);
@@ -116,6 +142,13 @@ html, body {
   -webkit-appearance: none;
   appearance: none;
   transition: background 0.15s, border-color 0.15s;
+}
+
+.m-icon-btn-compact {
+  min-width: auto;
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 12px;
 }
 
 .m-icon-btn:active {
@@ -204,6 +237,76 @@ html, body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-dim);
+}
+
+/* Playback controls inside sheet */
+.m-speed-row {
+  display: flex;
+  gap: 4px;
+}
+
+.m-speed-pill {
+  flex: 1;
+  min-height: 36px;
+  padding: 6px 4px;
+  border-radius: var(--radius-xs);
+  background: var(--glass-inner);
+  border: 1px solid var(--glass-border);
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.m-speed-pill:active {
+  background: var(--glass-bg-hover);
+}
+
+.m-speed-pill[aria-pressed="true"] {
+  background: var(--accent-dim);
+  border-color: var(--accent-strong);
+  color: var(--accent);
+}
+
+.m-reftime-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.m-reftime-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.m-reftime-controls {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.m-reftime-controls input[type="datetime-local"] {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  padding: 4px 8px;
+  background: var(--glass-inner);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 12px;
+  -webkit-appearance: none;
+  appearance: none;
+  color-scheme: dark;
+}
+
+.m-reftime-controls input[type="datetime-local"]:focus {
+  outline: none;
+  border-color: var(--accent-strong);
 }
 
 /* Satellite chip selector */
