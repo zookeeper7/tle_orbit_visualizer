@@ -60,7 +60,6 @@ const selectedSatIds = new Set();
 let focusedSatId = null;
 /** Cached propagation result for the focused satellite. */
 let focusedSatrec = null;
-let trackEnabled = false;
 const SHEET_STATES = ['sheet-peek', 'sheet-half', 'sheet-full'];
 let sheetStateIdx = 0;
 let toastTimer = null;
@@ -89,7 +88,6 @@ async function bootstrap() {
 
   setupTopBar();
   setupSheet();
-  setupTrackFab();
   renderSatChips();
   renderFocusedCard(null);
   renderPasses([]);
@@ -194,10 +192,6 @@ function setupTopBar() {
       modeBtn.textContent = '3D';
       modeBtn.setAttribute('aria-pressed', 'true');
     } else {
-      // Releasing tracking BEFORE the 2D morph starts is mandatory:
-      // Cesium throws "Invalid array length" in createPotentiallyVisibleSet
-      // when a tracked entity carries a SampledPositionProperty into 2D.
-      releaseTrackingForModeSwap();
       viewer.scene.morphTo2D(0.5);
       modeBtn.textContent = '2D';
       modeBtn.setAttribute('aria-pressed', 'false');
@@ -205,45 +199,6 @@ function setupTopBar() {
   });
 
   sheetBtn.addEventListener('click', cycleSheetState);
-}
-
-/**
- * Stop the camera lock and reset the Track FAB state. Used both when the
- * user explicitly toggles tracking off AND when we have to leave 3D for
- * any reason (manual mode toggle, focus change, satellite removal).
- */
-function releaseTrackingForModeSwap() {
-  if (!viewer) return;
-  if (viewer.trackedEntity) viewer.trackedEntity = undefined;
-  trackEnabled = false;
-  const fab = document.getElementById('mTrackFab');
-  if (fab) fab.setAttribute('aria-pressed', 'false');
-}
-
-/**
- * Promise wrapper around viewer.scene.morphTo3D so we can `await` the
- * morph and only attach the camera tracker AFTER the scene is back in
- * SCENE3D — binding viewer.trackedEntity mid-morph is what triggered
- * the createPotentiallyVisibleSet RangeError.
- */
-function morphToSceneMode(targetMode) {
-  return new Promise((resolve) => {
-    if (!viewer || viewer.scene.mode === targetMode) {
-      resolve();
-      return;
-    }
-    let removeListener = null;
-    const onComplete = () => {
-      if (typeof removeListener === 'function') removeListener();
-      resolve();
-    };
-    removeListener = viewer.scene.morphComplete.addEventListener(onComplete);
-    if (targetMode === Cesium.SceneMode.SCENE3D) {
-      viewer.scene.morphTo3D(0.5);
-    } else {
-      viewer.scene.morphTo2D(0.5);
-    }
-  });
 }
 
 // ─── Bottom sheet ─────────────────────────────────────────────────────────
@@ -315,7 +270,6 @@ async function toggleSatellite(satId, makeFocused) {
       focusedSatrec = null;
       renderFocusedCard(null);
       renderPasses([]);
-      hideTrackFab();
     }
     renderSatChips();
     return;
@@ -329,7 +283,6 @@ async function toggleSatellite(satId, makeFocused) {
     focusedSatrec = null;
     renderFocusedCard(null);
     renderPasses([]);
-    hideTrackFab();
     renderSatChips();
     return;
   }
@@ -382,7 +335,6 @@ async function toggleSatellite(satId, makeFocused) {
 }
 
 async function onFocusedSatelliteChanged(sat, satrec) {
-  showTrackFab();
   renderFocusedCard(sat);
 
   // Compute next 5 passes within 24h (read-only).
@@ -567,66 +519,6 @@ function formatAosShort(d) {
   const HH = String(d.getUTCHours()).padStart(2, '0');
   const MM = String(d.getUTCMinutes()).padStart(2, '0');
   return `${mm}/${dd} ${HH}:${MM}`;
-}
-
-// ─── Track FAB ────────────────────────────────────────────────────────────
-
-function setupTrackFab() {
-  const fab = document.getElementById('mTrackFab');
-  if (!fab) return;
-  fab.addEventListener('click', async () => {
-    if (!viewer || !focusedSatId) return;
-
-    // Toggle OFF — easy path
-    if (trackEnabled) {
-      trackEnabled = false;
-      fab.setAttribute('aria-pressed', 'false');
-      viewer.trackedEntity = undefined;
-      return;
-    }
-
-    // Toggle ON — must guarantee 3D first.
-    // Binding viewer.trackedEntity to a SampledPositionProperty entity
-    // in SCENE2D crashes Cesium's frustum culler with
-    // "Failed to set the length property on Array: Invalid array length"
-    // and permanently stops rendering. So if we're in 2D, morph to 3D
-    // FIRST and only attach the tracker after the morph completes.
-    if (viewer.scene.mode === Cesium.SceneMode.SCENE2D) {
-      try {
-        await morphToSceneMode(Cesium.SceneMode.SCENE3D);
-        const modeBtn = document.getElementById('mModeToggle');
-        if (modeBtn) {
-          modeBtn.textContent = '3D';
-          modeBtn.setAttribute('aria-pressed', 'true');
-        }
-        showToast('Switched to 3D for tracking');
-      } catch (_) {
-        showToast('Could not switch to 3D — tracking cancelled');
-        return;
-      }
-    }
-
-    const ent = viewer.entities.getById(`m-sat-${focusedSatId}`);
-    if (!ent) return;
-    trackEnabled = true;
-    fab.setAttribute('aria-pressed', 'true');
-    viewer.trackedEntity = ent;
-  });
-}
-
-function showTrackFab() {
-  const fab = document.getElementById('mTrackFab');
-  if (fab) fab.hidden = false;
-}
-
-function hideTrackFab() {
-  const fab = document.getElementById('mTrackFab');
-  if (fab) {
-    fab.hidden = true;
-    fab.setAttribute('aria-pressed', 'false');
-  }
-  trackEnabled = false;
-  if (viewer) viewer.trackedEntity = undefined;
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────
