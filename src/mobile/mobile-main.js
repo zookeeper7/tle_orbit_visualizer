@@ -913,23 +913,25 @@ async function syncVisualization() {
         pointsPerOrbit: 120,
         referenceDate: referenceDate || undefined,
       });
-      // Two mobile-specific options:
-      //   drawGroundTrack:false — skips the clampToGround dashed line.
-      //   arcType: ArcType.NONE — every regular polyline (nadir line +
-      //     12 taper bands) is drawn as straight segments between
-      //     samples instead of geodesic arcs. The default GEODESIC
-      //     tessellation calls Cesium's generateCartesianArc, which
-      //     intermittently throws "Invalid array length" on
-      //     low-power-WebGL + SCENE2D-default mobile contexts and stops
-      //     the entire render loop. NONE skips that code path entirely
-      //     and the visual difference between straight and geodesic
-      //     segments is invisible at the ~1-minute sample spacing.
+      // The mobile build only overrides drawGroundTrack:false to skip the
+      // clampToGround dashed ground track (the mobile camera rarely sits
+      // close enough to the surface to see it, and it's expensive).
+      //
+      // arcType was previously forced to NONE to dodge a "RangeError:
+      // Invalid array length" thrown from Cesium's generateCartesianArc
+      // when the sample list contained NaN positions, but propagateOrbit
+      // now guards every sample with Number.isFinite checks so the
+      // upstream NaN can no longer reach the tessellator. Leaving arcType
+      // at its GEODESIC default means the 3D taper bands and nadir line
+      // render exactly like the desktop build — which the mobile version
+      // wasn't doing in 3D mode (the NONE option was producing invisible
+      // trails on this Cesium version when SCENE3D was active).
       addSatelliteVisualization(
         viewer,
         sat.name,
         result.positions,
         result.info,
-        { drawGroundTrack: false, arcType: Cesium.ArcType.NONE },
+        { drawGroundTrack: false },
         sat.color,
       );
       if (!firstPositions) firstPositions = result.positions;
