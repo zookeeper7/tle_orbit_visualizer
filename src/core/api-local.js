@@ -145,6 +145,49 @@ function nextMappingId() {
   return id;
 }
 
+/**
+ * For every satellite in localStorage whose id matches a PRESETS key,
+ * replace the 14-char epoch portion of TLE line 1 (cols 18..31, 0-based)
+ * with the freshly-generated epoch from the in-memory PRESETS object.
+ *
+ * Rationale: a returning visitor's localStorage was seeded with a
+ * placeholder TLE whose epoch was current at the time of their first
+ * visit. Weeks later that epoch is stale enough that SGP4 produces NaN
+ * samples for many positions and the orbit either flickers or fails to
+ * propagate at all. PRESETS.tle is regenerated on every module load
+ * (see presets.js), so the only thing we need to do is splice that
+ * fresh epoch into the cached satellite records.
+ *
+ * Only the epoch substring is touched — any user edit elsewhere in
+ * line 1 (BSTAR, mean motion derivatives) and all of line 2 (mean
+ * motion, inclination, RAAN, etc.) are preserved verbatim.
+ */
+function refreshPresetTleEpoch() {
+  const satellites = readRaw(K.satellites, []);
+  if (!Array.isArray(satellites) || satellites.length === 0) return;
+
+  let changed = false;
+  for (const sat of satellites) {
+    if (!sat || !sat.id || typeof sat.tleLine1 !== 'string') continue;
+    const preset = PRESETS[sat.id];
+    if (!preset) continue;
+
+    const presetLines = preset.tle.split('\n').map((l) => l.trim());
+    const presetLine1 = presetLines.length === 3 ? presetLines[1] : presetLines[0];
+    if (typeof presetLine1 !== 'string' || presetLine1.length < 32) continue;
+
+    const freshEpoch = presetLine1.substring(18, 32);
+    if (sat.tleLine1.length < 32) continue;
+    const currentEpoch = sat.tleLine1.substring(18, 32);
+    if (currentEpoch === freshEpoch) continue;
+
+    sat.tleLine1 = sat.tleLine1.substring(0, 18) + freshEpoch + sat.tleLine1.substring(32);
+    changed = true;
+  }
+
+  if (changed) writeRaw(K.satellites, satellites);
+}
+
 // ─── Seed (idempotent, lazy) ───────────────────────────────────────────────
 //
 // Mirrors server.js seedDefaults() exactly: groups → satellites → stations →
@@ -159,7 +202,13 @@ function ensureSeeded() {
   if (_seeded) return;
   _seeded = true; // set first to short-circuit re-entry through read()/write()
 
-  if (readRaw(K.seeded, null) === '1') return;
+  if (readRaw(K.seeded, null) === '1') {
+    // Already seeded on a previous visit. Just refresh the placeholder
+    // TLE epoch of every PRESET-derived satellite so they keep
+    // propagating cleanly even if the user hasn't visited in months.
+    refreshPresetTleEpoch();
+    return;
+  }
 
   // Groups
   const now = nowIso();
