@@ -711,14 +711,18 @@ export function initOrbitViewer(viewer) {
         }
       }
 
-      showConnStatus(`Latest TLE loaded for ${sat.name}`, 'success');
       // resetClock so the playhead jumps to "now" (or the custom reference
-      // time) and the camera ends up on the satellite's *real* current
-      // location — not wherever the playhead happened to be sitting when
-      // Fetch was clicked. Without this, the camera would zoom to the
-      // entity at the stale clock time and users would see the satellite
-      // in the wrong place, which used to look like a broken tracker.
-      visualize({ resetClock: true });
+      // time) — the camera ends up on the satellite's REAL current
+      // location, not wherever the playhead happened to be sitting when
+      // Fetch was clicked.
+      //
+      // autoTrackFocused so the user lands on a clear "follow the
+      // satellite" view (sub-satellite point lookAt with the Track
+      // button highlighted) instead of an ambiguous mid-distance zoom.
+      // The user can still drag the globe to release tracking or click
+      // Track again to toggle it off.
+      visualize({ resetClock: true, autoTrackFocused: true });
+      showConnStatus(`Latest TLE loaded for ${sat.name} — tracking enabled`, 'success');
     } catch (err) {
       showConnStatus(err.message, 'error');
     } finally {
@@ -1175,6 +1179,11 @@ export function initOrbitViewer(viewer) {
     // the new window. Used by explicit time-jump actions like Reference Time
     // Apply / NOW; everywhere else we want to preserve the user's position.
     const resetClock = options.resetClock === true;
+    // autoTrackFocused: when visualizing a single satellite, automatically
+    // attach the camera tracker even if the user wasn't already tracking.
+    // Used by Fetch Latest TLE so the user lands on a clear "follow the
+    // satellite" view instead of an ambiguous mid-distance zoom.
+    const autoTrackFocused = options.autoTrackFocused === true;
     hideError();
 
     const satIds = Array.from(selectedSatIds);
@@ -1276,19 +1285,25 @@ export function initOrbitViewer(viewer) {
         viewer.trackedEntity = undefined;
         if (entities.length === 1) {
           // Resolve sat ID from the entity name (set by
-          // addSatelliteVisualization). If tracking was already active for
-          // THIS satellite (e.g. the user had clicked Track before
-          // triggering a re-visualize via Fetch Latest TLE / Auto Refresh
-          // / a slider change), re-attach the camera to the freshly-built
-          // entity so tracking stays continuous. Otherwise just zoom to
-          // the entity once and leave the camera under user control —
-          // automatically starting tracking on every re-visualize used
-          // to surprise users with a "snapped-to-satellite" view they
-          // never asked for.
+          // addSatelliteVisualization). Three camera options when only
+          // one satellite is in the scene:
+          //   (a) Tracking was already active for THIS satellite (e.g.
+          //       user had clicked Track before triggering a
+          //       re-visualize via Auto Refresh / slider drag) →
+          //       re-attach the camera to the freshly-built entity so
+          //       tracking stays continuous.
+          //   (b) Caller passed autoTrackFocused (e.g. Fetch Latest
+          //       TLE) → start tracking unconditionally so the user
+          //       lands on a clear "follow the satellite" view instead
+          //       of an ambiguous mid-distance zoom.
+          //   (c) Neither → just zoom to the entity once and leave
+          //       the camera under user control. Automatic tracking on
+          //       every re-visualize used to surprise users with a
+          //       "snapped-to-satellite" view they never asked for.
           const onlyEntity = entities[0];
           const onlySatId = Object.keys(satById).find((id) => satById[id].name === onlyEntity.name);
           const wasTrackingThisSat = onlySatId && customTrackingSatId === onlySatId;
-          if (wasTrackingThisSat) {
+          if (wasTrackingThisSat || (autoTrackFocused && onlySatId)) {
             startCustomTracking(onlySatId, onlyEntity);
           } else {
             // If we were tracking some OTHER satellite that's no longer
