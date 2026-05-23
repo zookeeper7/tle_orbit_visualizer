@@ -28,17 +28,12 @@ const MAP_MODE_2D_ROTATE = 1;
  * Pick a resolutionScale based on the device's CPU cores and pixel density.
  * Lower scale = fewer rendered pixels = lower GPU/battery.
  *
- * Rationale for the DPR branch first: a DPR of 1 means we're either on a
- * desktop monitor (incl. DevTools mobile emulation) or a very old phone.
- * In either case there is no "free" DPR multiplier on top of the
- * resolutionScale, so dialing scale below 1.0 just makes the canvas look
- * pixelated for no real perf win. Phones with DPR ≥ 2 then fall through
- * to the cores/DPR matrix that picks 0.75 / 1.0.
- *
- * The mid-range (>4 cores, DPR=2) tier renders at the native browser
- * resolution because requestRenderMode caps the average GPU duty cycle
- * to whatever the playback rate demands, so the perf headroom is in the
- * MSAA / globe-detail knobs rather than in undersampling the canvas.
+ * Modern phones (2023+) ship with GPUs that can render the Cesium globe
+ * at native browser resolution comfortably while requestRenderMode caps
+ * the average duty cycle to ~30 FPS during playback, so the
+ * resolutionScale ladder collapses to "always native". Very low-end
+ * devices (cores <= 2) still get a 0.75 fallback in case the GPU is the
+ * bottleneck.
  *
  * @param {{ hardwareConcurrency?: number, devicePixelRatio?: number }} [input]
  * @returns {number} 0.75 / 1.0
@@ -48,23 +43,25 @@ export function pickResolutionScale({ hardwareConcurrency, devicePixelRatio } = 
   const dpr = Number.isFinite(devicePixelRatio) ? devicePixelRatio : 1;
 
   if (dpr <= 1) return 1.0;                    // desktop / DevTools mobile mode
-  if (cores <= 4) return 0.75;                 // low-end mobile (was 0.5)
-  return 1.0;                                  // mid-range and high-end mobile
+  if (cores <= 2) return 0.75;                 // very-low-end safety net
+  return 1.0;                                  // every other device — native
 }
 
 /**
  * Pick scene.msaaSamples. Firefox has a long-standing MSAA artifact with
- * Cesium so it is always forced to 1 there.
+ * Cesium so it is always forced to 1 there. Cesium 1.139 caps the
+ * requested sample count to the driver maximum, so requesting 8 on a
+ * device that only supports 4 silently downgrades — no fallback needed.
  *
  * @param {{ hardwareConcurrency?: number, userAgent?: string }} [input]
- * @returns {number} 1 / 2 / 4
+ * @returns {number} 1 / 4 / 8
  */
 export function pickMsaaSamples({ hardwareConcurrency, userAgent } = {}) {
   const ua = userAgent || '';
   if (/firefox/i.test(ua)) return 1;
   const cores = Number.isFinite(hardwareConcurrency) ? hardwareConcurrency : 6;
-  if (cores <= 4) return 2;                    // low-end mobile (was 1)
-  return 4;                                    // mid-range and up (was 2)
+  if (cores <= 4) return 4;                    // low-end mobile (was 2)
+  return 8;                                    // mid-range and up (was 4)
 }
 
 /**
@@ -140,13 +137,16 @@ export function applyMobileViewerTweaks(viewer, { resolutionScale, msaaSamples }
     viewer.scene.postProcessStages.fxaa.enabled = false;
   }
 
-  // Globe — tighter screen-space error and a larger tile cache give a
-  // noticeably crisper map at typical phone pinch-zoom distances; both
-  // costs are bounded by requestRenderMode + the global resolutionScale.
+  // Globe — pushed close to desktop fidelity. Cesium's default
+  // maximumScreenSpaceError is 2 on desktop and the 2-line LOD jump
+  // between 2.0 and 1.5 is the difference between visibly chunky tiles
+  // and a crisp pinch-zoom on a modern phone. tileCacheSize doubled
+  // again because the higher tile count from SSE 1.5 makes pan-cycle
+  // re-fetching much more common at the old cap.
   const g = viewer.scene.globe;
   if (g) {
-    g.maximumScreenSpaceError = 2;             // was 4 — half the tile coarseness
-    g.tileCacheSize = 100;                     // was 50 — fewer re-loads on pan
+    g.maximumScreenSpaceError = 1.5;           // was 2 — desktop-class detail
+    g.tileCacheSize = 200;                     // was 100 — covers SSE 1.5 working set
     g.preloadSiblings = false;
     g.preloadAncestors = true;
     g.enableLighting = false;
