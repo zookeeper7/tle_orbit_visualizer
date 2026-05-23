@@ -477,7 +477,17 @@ async function syncVisualization() {
         pointsPerOrbit: 120,
         referenceDate: referenceDate || undefined,
       });
-      addSatelliteVisualization(viewer, sat.name, result.positions, result.info, {}, sat.color);
+      // drawGroundTrack: false skips the clampToGround polyline whose
+      // arc tessellation crashes Cesium's frustum culler on mobile
+      // ("Invalid array length" at generateCartesianArc).
+      addSatelliteVisualization(
+        viewer,
+        sat.name,
+        result.positions,
+        result.info,
+        { drawGroundTrack: false },
+        sat.color,
+      );
       if (!firstPositions) firstPositions = result.positions;
     } catch (err) {
       // eslint-disable-next-line no-console

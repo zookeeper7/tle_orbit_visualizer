@@ -206,21 +206,30 @@ export function addSatelliteVisualization(viewer, name, positions, orbitalInfo, 
     }
   }
 
-  const segments = splitAtAntimeridian(positions);
-  for (const seg of segments) {
-    const cartesians = seg.map(p => Cesium.Cartesian3.fromDegrees(p.longitude, p.latitude, 0));
-    const gt3d = viewer.entities.add({
-      polyline: {
-        positions: cartesians,
-        width: 1,
-        material: new Cesium.PolylineDashMaterialProperty({
-          color: satColor.withAlpha(0.12),
-          dashLength: 16,
-        }),
-        clampToGround: true,
-      },
-    });
-    groundTrack3d.push(gt3d);
+  // The ground-track polyline uses clampToGround: true → it's a
+  // GroundPolyline whose great-circle tessellation goes through
+  // generateCartesianArc. On the mobile viewer (SCENE2D default,
+  // low-power WebGL, smaller tile cache) that path occasionally
+  // crashes with "Invalid array length". Callers that prefer to skip
+  // this affordance can pass options.drawGroundTrack = false.
+  const drawGroundTrack = !options || options.drawGroundTrack !== false;
+  if (drawGroundTrack) {
+    const segments = splitAtAntimeridian(positions);
+    for (const seg of segments) {
+      const cartesians = seg.map(p => Cesium.Cartesian3.fromDegrees(p.longitude, p.latitude, 0));
+      const gt3d = viewer.entities.add({
+        polyline: {
+          positions: cartesians,
+          width: 1,
+          material: new Cesium.PolylineDashMaterialProperty({
+            color: satColor.withAlpha(0.12),
+            dashLength: 16,
+          }),
+          clampToGround: true,
+        },
+      });
+      groundTrack3d.push(gt3d);
+    }
   }
 
   _satelliteEntity = satelliteEntity;
