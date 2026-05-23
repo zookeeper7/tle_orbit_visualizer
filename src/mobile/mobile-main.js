@@ -658,10 +658,148 @@ function setupTopBar() {
 }
 
 // ─── Bottom sheet ─────────────────────────────────────────────────────────
+//
+// The sheet has three snap points (peek / half / full) driven by CSS custom
+// properties --sheet-h-peek / --sheet-h-half / --sheet-h-full applied as
+// translateY values. setupSheet wires up two interaction patterns to the
+// drag handle:
+//
+//   1. Tap (pointer moved less than DRAG_THRESHOLD_PX) cycles to the next
+//      snap in the same order as before — same UX as the original
+//      click-only handler.
+//
+//   2. Drag (pointer moved at or above the threshold) lets the user
+//      position the sheet directly anywhere between the fully expanded
+//      and the peek translateY, then snaps to whichever of the three
+//      anchors is closest when the pointer is released.
+//
+// Implementation notes:
+//
+//   - Pointer Events with setPointerCapture so the drag survives the
+//     pointer leaving the handle's bounding box (especially relevant on
+//     small phone screens where the user often drags well past the
+//     handle).
+//   - touch-action: none on the handle (in mobile.css) so the browser
+//     never scrolls the page or fires its own pan gesture during the
+//     drag.
+//   - sheet.style.transition = 'none' while dragging so the box tracks
+//     the finger 1:1 instead of lerping. The transition is restored
+//     before the snap so the final settle still animates.
+//   - The snap-point translateY values are resolved from the CSS
+//     variables via getComputedStyle, so any future tweak to
+//     --sheet-h-* in CSS is automatically picked up here.
 
 function setupSheet() {
   const handle = document.getElementById('mSheetHandle');
-  if (handle) handle.addEventListener('click', cycleSheetState);
+  const sheet = document.getElementById('mSheet');
+  if (!handle || !sheet) return;
+
+  const DRAG_THRESHOLD_PX = 5;
+  let dragging = false;
+  let startY = 0;
+  let startTransform = 0;
+  let moved = false;
+  let activePointerId = null;
+
+  function snapTranslateYs() {
+    const cs = getComputedStyle(document.documentElement);
+    const parsePx = (name) => {
+      const raw = cs.getPropertyValue(name).trim();
+      const m = raw.match(/(-?\d*\.?\d+)px/);
+      return m ? parseFloat(m[1]) : NaN;
+    };
+    // Index matches SHEET_STATES = ['sheet-peek','sheet-half','sheet-full']
+    return [
+      parsePx('--sheet-h-peek'),
+      parsePx('--sheet-h-half'),
+      parsePx('--sheet-h-full'),
+    ];
+  }
+
+  function currentTranslateY() {
+    // Inline style wins during a drag; otherwise fall back to the
+    // computed transform matrix coming from the .sheet-* class.
+    const inline = sheet.style.transform;
+    const m = inline && inline.match(/translateY\((-?\d*\.?\d+)px\)/);
+    if (m) return parseFloat(m[1]);
+    const cs = getComputedStyle(sheet);
+    if (cs.transform && cs.transform !== 'none') {
+      const mm = cs.transform.match(/matrix\(([^)]+)\)/);
+      if (mm) {
+        const parts = mm[1].split(',').map((s) => parseFloat(s.trim()));
+        if (Number.isFinite(parts[5])) return parts[5];
+      }
+    }
+    return 0;
+  }
+
+  function settleToNearestSnap(currentY) {
+    const snaps = snapTranslateYs();
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < snaps.length; i++) {
+      if (!Number.isFinite(snaps[i])) continue;
+      const d = Math.abs(snaps[i] - currentY);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+    sheet.style.transform = '';  // hand control back to the CSS class
+    sheet.classList.remove(...SHEET_STATES);
+    sheet.classList.add(SHEET_STATES[bestIdx]);
+    sheetStateIdx = bestIdx;
+  }
+
+  handle.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    moved = false;
+    startY = e.clientY;
+    startTransform = currentTranslateY();
+    activePointerId = e.pointerId;
+    try { handle.setPointerCapture(activePointerId); } catch (_) { /* unsupported in some test envs */ }
+    sheet.style.transition = 'none';
+    e.preventDefault();
+  });
+
+  handle.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dy = e.clientY - startY;
+    if (Math.abs(dy) >= DRAG_THRESHOLD_PX) moved = true;
+
+    const snaps = snapTranslateYs().filter(Number.isFinite);
+    if (snaps.length === 0) return;
+    const minY = Math.min(...snaps);  // sheet-full (smallest translateY)
+    const maxY = Math.max(...snaps);  // sheet-peek (largest translateY)
+    const nextY = Math.max(minY, Math.min(maxY, startTransform + dy));
+    sheet.style.transform = `translateY(${nextY}px)`;
+  });
+
+  function endDrag(e) {
+    if (!dragging) return;
+    dragging = false;
+    if (activePointerId !== null) {
+      try { handle.releasePointerCapture(activePointerId); } catch (_) {}
+      activePointerId = null;
+    }
+    // Restore the CSS-defined transition before applying the snap so the
+    // settle animates rather than jumping.
+    sheet.style.transition = '';
+
+    if (moved) {
+      settleToNearestSnap(currentTranslateY());
+    } else {
+      // No drag — treat this as a tap and advance to the next snap.
+      sheet.style.transform = '';
+      cycleSheetState();
+    }
+    if (e) e.preventDefault();
+  }
+
+  handle.addEventListener('pointerup', endDrag);
+  handle.addEventListener('pointercancel', endDrag);
+
+  // Also let the dedicated top-bar "sheet" button cycle the state.
 }
 
 function cycleSheetState() {

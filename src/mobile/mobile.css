@@ -214,7 +214,14 @@ html, body {
   background: transparent;
   cursor: grab;
   position: relative;
+  /* Stop the browser from scrolling the page or firing its own pan
+   * gesture while the user drags the sheet — we own the pointer here. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
+
+.m-sheet-handle:active { cursor: grabbing; }
 
 .m-sheet-handle::before {
   content: '';
