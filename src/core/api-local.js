@@ -149,28 +149,37 @@ function nextMappingId() {
 
 /**
  * For every satellite in localStorage whose id matches a PRESETS key,
- * realign its identity fields (noradId + the NORAD/intl-designator/epoch
- * portions of the TLE) to whatever the in-memory PRESETS now declares.
+ * realign its identity fields (noradId + the NORAD/intl-designator portions
+ * of the TLE) to whatever the in-memory PRESETS now declares. For rows
+ * that still hold the synthetic placeholder TLE (drag, BSTAR and ndot
+ * all zero, i.e. everything past column 32 matches the preset line 1) we ALSO
+ * splice in a fresh epoch so the placeholder propagates cleanly with
+ * SGP4 instead of running stale.
  *
  * Why this exists: an early build of the app shipped synthetic placeholder
  * NORAD IDs (99001, 99002, …) which never resolved on CelesTrak — so
  * "Fetch Latest TLE" 404'd for every preset. PRESETS was later corrected
  * to real NORAD IDs, but a returning visitor's localStorage still holds
- * the old placeholders. Same story for the epoch: a stale epoch sends
- * SGP4 numerically unstable. We splice the corrected fields in on every
- * page load so the demo self-heals without forcing the user to clear
- * their storage.
+ * the old placeholders. We splice the corrected NORAD/intl fields in on
+ * every page load so the demo self-heals without forcing the user to
+ * clear their storage.
  *
- * What we touch (preserve user edits elsewhere):
- *   - sat.noradId           ← preset.noradId
- *   - tleLine1 cols 2..6    ← preset NORAD (5 chars)
- *   - tleLine1 cols 9..16   ← preset international designator (8 chars)
- *   - tleLine1 cols 18..31  ← fresh epoch (14 chars, regenerated each load)
- *   - tleLine2 cols 2..6    ← preset NORAD (5 chars)
+ * Why epoch handling is conditional: a TLE is a self-consistent fit at
+ * its stated epoch — the mean anomaly, RAAN, argument of perigee and
+ * mean motion are only meaningful together with the epoch they were fit
+ * for. If we rewrite the epoch of a fetched real TLE while leaving line
+ * 2 alone, SGP4 happily propagates the (now-inconsistent) elements and
+ * produces silent km-scale position errors (Vallado AIAA-2008-6770). So
+ * we only refresh the epoch on rows where the rest of line 1 still
+ * matches the preset's placeholder — those rows have no fitted physics
+ * to preserve and benefit from a fresh epoch.
  *
- * Everything else (BSTAR, mean motion derivatives, inclination, RAAN,
- * eccentricity, argument of perigee, mean anomaly, mean motion) is left
- * exactly as the user has it — so editing line 2 manually still sticks.
+ * What we touch (preserve user edits / fetched data elsewhere):
+ *   - sat.noradId           ← preset.noradId (always)
+ *   - tleLine1 cols 2..6    ← preset NORAD (always)
+ *   - tleLine1 cols 9..16   ← preset international designator (always)
+ *   - tleLine1 cols 18..31  ← fresh epoch ONLY when row is still placeholder
+ *   - tleLine2 cols 2..6    ← preset NORAD (always)
  */
 function refreshPresetIdentity() {
   const satellites = readRaw(K.satellites, []);
@@ -192,18 +201,26 @@ function refreshPresetIdentity() {
     const presetLine1 = presetLines.length === 3 ? presetLines[1] : presetLines[0];
     const presetLine2 = presetLines.length === 3 ? presetLines[2] : presetLines[1];
 
-    // (b) tleLine1 NORAD + intl + epoch
+    // (b) tleLine1 NORAD + intl (+ epoch only for placeholder rows)
     if (
       typeof sat.tleLine1 === 'string' && sat.tleLine1.length >= 32
       && typeof presetLine1 === 'string' && presetLine1.length >= 32
     ) {
+      // A row is "still placeholder" if everything past the epoch (drag,
+      // B*, ndot, element set number, checksum) matches the preset's
+      // placeholder line 1 exactly. As soon as a real fetch lands or the
+      // user manually edits the drag/B*, the substrings diverge and we
+      // stop touching the epoch.
+      const isPlaceholder = sat.tleLine1.substring(32) === presetLine1.substring(32);
+      const epochSource = isPlaceholder ? presetLine1 : sat.tleLine1;
+
       const merged = (
         sat.tleLine1.substring(0, 2)
         + presetLine1.substring(2, 7)         // NORAD (cols 2..6)
         + sat.tleLine1.substring(7, 9)
         + presetLine1.substring(9, 17)        // intl designator (cols 9..16)
         + sat.tleLine1.substring(17, 18)
-        + presetLine1.substring(18, 32)       // epoch (cols 18..31)
+        + epochSource.substring(18, 32)       // epoch (placeholder → fresh, fetched → preserved)
         + sat.tleLine1.substring(32)
       );
       if (merged !== sat.tleLine1) {
