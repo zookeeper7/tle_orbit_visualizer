@@ -3,35 +3,69 @@
  *
  * Satellite rendering is now done with the desktop renderer
  * (`src/visualization.js`) so the orbit trail behaves the same on both
- * builds. The only thing the mobile build still owns is the ground-station
- * marker — desktop draws a coverage ellipse around each station which
- * clutters a small viewport, so on mobile we render only the point + label.
+ * builds. The only mobile-specific concern is that desktop's
+ * `clearVisualization` / `clearGroundStations` walk their own entity
+ * registry, so the mobile ground-station entities are tracked in this
+ * module's own scope to avoid cross-pollution.
  *
- * The mobile ground-station entity registry is kept in this module's own
- * scope so that desktop's `clearVisualization` / `clearGroundStations`
- * never touch it (and vice versa).
+ * Coverage circles use the same `computeCoverageRadiusKm` formula as
+ * desktop (`createGroundStationVisuals`) and the same yellow palette,
+ * just with a slightly thinner outline (2 px instead of 3) so they read
+ * cleanly on a small viewport.
  */
 
 import * as Cesium from 'cesium';
+import { computeCoverageRadiusKm } from '../ground-stations.js';
 
 const LABEL_OUTLINE = new Cesium.Color(0.02, 0.02, 0.06, 0.9);
+const COVERAGE_COLOR = Cesium.Color.fromCssColorString('#facc15');
 
-/** Ground-station marker entities (one per station). */
+/** Ground-station marker entities (one per station + optional coverage). */
 let _gsEntities = [];
 
 /**
- * Add minimal ground-station markers — point + label only, no coverage ellipse.
+ * Add ground-station markers: point + label, plus a coverage ellipse when
+ * an average satellite altitude is available.
  *
  * @param {Cesium.Viewer} viewer
- * @param {Array<{id: string, name: string, lat: number, lon: number}>} stations
+ * @param {Array<{id: string, name: string, lat: number, lon: number, minElevDeg?: number}>} stations
+ * @param {number|null} [avgAltKm] Mean satellite altitude in km. When null
+ *   or non-positive (e.g. before any satellite is visualized) coverage
+ *   ellipses are skipped and only the point + label are drawn.
  */
-export function addMobileGroundStations(viewer, stations) {
+export function addMobileGroundStations(viewer, stations, avgAltKm = null) {
   if (!viewer || !Array.isArray(stations)) return;
   clearMobileGroundStations(viewer);
 
+  const drawCoverage = Number.isFinite(avgAltKm) && avgAltKm > 0;
+
   for (const s of stations) {
     if (!s || !Number.isFinite(s.lat) || !Number.isFinite(s.lon)) continue;
-    const e = viewer.entities.add({
+
+    if (drawCoverage) {
+      const minElev = Number.isFinite(s.minElevDeg) ? s.minElevDeg : 5;
+      const radiusKm = computeCoverageRadiusKm(avgAltKm, minElev);
+      const radiusM = radiusKm * 1000;
+      if (radiusM > 0) {
+        const coverage = viewer.entities.add({
+          id: `m-gs-${s.id}-coverage`,
+          name: `${s.name || s.id} — Coverage`,
+          position: Cesium.Cartesian3.fromDegrees(s.lon, s.lat),
+          ellipse: {
+            semiMajorAxis: radiusM,
+            semiMinorAxis: radiusM,
+            material: COVERAGE_COLOR.withAlpha(0.06),
+            outline: true,
+            outlineColor: COVERAGE_COLOR.withAlpha(0.9),
+            outlineWidth: 2,
+            height: 0,
+          },
+        });
+        _gsEntities.push(coverage);
+      }
+    }
+
+    const marker = viewer.entities.add({
       id: `m-gs-${s.id}`,
       name: s.name || s.id,
       position: Cesium.Cartesian3.fromDegrees(s.lon, s.lat, 0),
@@ -52,7 +86,7 @@ export function addMobileGroundStations(viewer, stations) {
         pixelOffset: new Cesium.Cartesian2(12, -8),
       },
     });
-    _gsEntities.push(e);
+    _gsEntities.push(marker);
   }
 }
 

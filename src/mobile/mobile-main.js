@@ -895,6 +895,8 @@ async function syncVisualization() {
   clearVisualization(viewer);
 
   let firstPositions = null;
+  let avgAltSum = 0;
+  let avgAltCount = 0;
   for (const satId of selectedSatIds) {
     const sat = satellitesList.find((s) => s.id === satId);
     if (!sat) continue;
@@ -926,13 +928,21 @@ async function syncVisualization() {
         sat.color,
       );
       if (!firstPositions) firstPositions = result.positions;
+      if (Number.isFinite(result.info?.apogeeAlt) && Number.isFinite(result.info?.perigeeAlt)) {
+        avgAltSum += (result.info.apogeeAlt + result.info.perigeeAlt) / 2;
+        avgAltCount += 1;
+      }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('[mobile] failed to visualize', sat.id, err);
     }
   }
 
-  if (stationsList.length > 0) addMobileGroundStations(viewer, stationsList);
+  // Mean altitude across every visualized satellite — drives the ground
+  // station coverage-circle radius (same formula as desktop's
+  // `createGroundStationVisuals`). null when nothing is visualized.
+  const avgAltKm = avgAltCount > 0 ? avgAltSum / avgAltCount : null;
+  if (stationsList.length > 0) addMobileGroundStations(viewer, stationsList, avgAltKm);
 
   if (firstPositions) setClockForPositions(firstPositions);
 }
