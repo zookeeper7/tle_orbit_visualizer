@@ -76,19 +76,22 @@ export function addMobileGroundStations(viewer, stations, avgAltKm = null) {
         outlineWidth: 2,
       },
       label: {
-        // Bumped from 30 px / scale 0.28 (≈ 8.4 px on-canvas, half the
-        // desktop equivalent on a high-DPR phone) to a 44 px texture at
-        // scale 0.5 (≈ 22 px on-canvas) so the station name is readable
-        // without zooming in. Higher font size = crisper texture; larger
-        // scale = bigger sprite of those same crisp glyphs.
+        // Texture stays at the bumped 44 px font (sharper than the
+        // original 30 px) but the sprite scale drops back down to 0.32
+        // so the label reads small on screen — the user wants the
+        // glyphs crisp, not large. The remaining net change vs. the
+        // original (30 px / 0.28 ≈ 8.4 px on-canvas) is a slightly
+        // larger on-canvas footprint (44 × 0.32 ≈ 14 px) painted with
+        // a higher-resolution texture, so the same letters are both
+        // legible and noticeably sharper.
         text: s.name || s.id,
         font: '600 44px "Segoe UI", system-ui, sans-serif',
-        scale: 0.5,
+        scale: 0.32,
         fillColor: Cesium.Color.fromCssColorString('#34d399'),
         outlineColor: LABEL_OUTLINE,
-        outlineWidth: 6,
+        outlineWidth: 4,
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        pixelOffset: new Cesium.Cartesian2(14, -10),
+        pixelOffset: new Cesium.Cartesian2(12, -8),
       },
     });
     _gsEntities.push(marker);
