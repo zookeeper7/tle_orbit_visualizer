@@ -68,6 +68,17 @@ export function createOrbitVisualization(viewer, name, positions, orbitalInfo, o
 export function addSatelliteVisualization(viewer, name, positions, orbitalInfo, options, color = '#7dd3fc') {
   const satColor = Cesium.Color.fromCssColorString(color);
 
+  // Polyline arc type. Default GEODESIC (Cesium's own default) so desktop
+  // keeps drawing great-circle arcs between samples. The mobile build
+  // overrides this to ArcType.NONE to dodge a "RangeError: Invalid array
+  // length" thrown inside generateCartesianArc — on low-power mobile
+  // WebGL contexts starting in SCENE2D, the geodesic tessellation hits a
+  // numerical edge case and stops the entire render loop. With NONE the
+  // polyline is drawn as straight-line segments between samples; since
+  // each propagation sample is ≤ 1 minute (≤ ~450 km) apart the visual
+  // difference is invisible at typical zoom levels.
+  const arcType = (options && options.arcType !== undefined) ? options.arcType : undefined;
+
   // --- Build SampledPositionProperty (at altitude) ---
   const sampledPosition = new Cesium.SampledPositionProperty();
   sampledPosition.setInterpolationOptions({
@@ -179,6 +190,7 @@ export function addSatelliteVisualization(viewer, name, positions, orbitalInfo, 
         color: CORAL.withAlpha(0.3),
         dashLength: 16,
       }),
+      arcType,
     },
   });
   d3Only.push(nadirLine);
@@ -194,6 +206,7 @@ export function addSatelliteVisualization(viewer, name, positions, orbitalInfo, 
             glowPower: TAPER_GLOWS[b],
             color: satColor.withAlpha(TAPER_ALPHAS[b]),
           }),
+          arcType,
         },
       });
       taper3d.push(e3d);
@@ -203,6 +216,7 @@ export function addSatelliteVisualization(viewer, name, positions, orbitalInfo, 
           positions: new Cesium.CallbackProperty(makeTaperCB(viewer, positions, isPast, b, true), false),
           width: TAPER_WIDTHS_2D[b],
           material: satColor.withAlpha(TAPER_ALPHAS[b] * 0.7),
+          arcType,
           // clampToGround REMOVED: the taper2d bands are only ever shown in
           // SCENE2D, and makeTaperCB already returns Cartesian3 positions
           // with altitude 0 when isGround=true. In the 2D Mercator
@@ -219,21 +233,30 @@ export function addSatelliteVisualization(viewer, name, positions, orbitalInfo, 
     }
   }
 
-  const segments = splitAtAntimeridian(positions);
-  for (const seg of segments) {
-    const cartesians = seg.map(p => Cesium.Cartesian3.fromDegrees(p.longitude, p.latitude, 0));
-    const gt3d = viewer.entities.add({
-      polyline: {
-        positions: cartesians,
-        width: 1,
-        material: new Cesium.PolylineDashMaterialProperty({
-          color: satColor.withAlpha(0.12),
-          dashLength: 16,
-        }),
-        clampToGround: true,
-      },
-    });
-    groundTrack3d.push(gt3d);
+  // The ground-track polyline uses clampToGround: true → it's a
+  // GroundPolyline whose great-circle tessellation goes through
+  // generateCartesianArc. On the mobile viewer (SCENE2D default,
+  // low-power WebGL, smaller tile cache) that path occasionally
+  // crashes with "Invalid array length". Callers that prefer to skip
+  // this affordance can pass options.drawGroundTrack = false.
+  const drawGroundTrack = !options || options.drawGroundTrack !== false;
+  if (drawGroundTrack) {
+    const segments = splitAtAntimeridian(positions);
+    for (const seg of segments) {
+      const cartesians = seg.map(p => Cesium.Cartesian3.fromDegrees(p.longitude, p.latitude, 0));
+      const gt3d = viewer.entities.add({
+        polyline: {
+          positions: cartesians,
+          width: 1,
+          material: new Cesium.PolylineDashMaterialProperty({
+            color: satColor.withAlpha(0.12),
+            dashLength: 16,
+          }),
+          clampToGround: true,
+        },
+      });
+      groundTrack3d.push(gt3d);
+    }
   }
 
   _satelliteEntity = satelliteEntity;

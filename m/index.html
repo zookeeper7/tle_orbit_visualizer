@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!--
+    Mobile entry. Must stay tiny: the inline script below has to run BEFORE
+    any module script so that:
+      1. The "?desktop=1" escape hatch redirects back to the desktop page
+         and persists the choice for the rest of the session.
+      2. Cesium's runtime knows where its workers/assets live. The shared
+         /dist/cesium/ directory sits one level above /m/, so we set
+         CESIUM_BASE_URL to '../cesium/'. (The static <link>/<script>
+         tags emitted by vite-plugin-cesium are rewritten to '../cesium/'
+         at build time by the mobile-cesium-rewrite plugin in vite.config.js,
+         so this only matters for runtime worker URL resolution.)
+  -->
+  <script>
+    (function () {
+      try {
+        var params = new URLSearchParams(window.location.search);
+        if (params.has('desktop')) {
+          try { sessionStorage.setItem('forceDesktop', '1'); } catch (_) {}
+          // Strip the flag so the URL doesn't keep it around after redirect.
+          params.delete('desktop');
+          var qs = params.toString();
+          window.location.replace('../' + (qs ? '?' + qs : ''));
+          return;
+        }
+      } catch (_) {
+        // sessionStorage / URLSearchParams not available — fall through to
+        // the normal mobile boot, which is still safe.
+      }
+      window.CESIUM_BASE_URL = '../cesium/';
+    })();
+  </script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no, maximum-scale=1.0">
+  <meta name="theme-color" content="#060610">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>TLE Visualizer — Mobile</title>
+  <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+  <script type="module" src="../src/mobile/mobile-main.js"></script>
+</head>
+<body>
+  <div id="mCesium"></div>
+
+  <header id="mTopBar">
+    <button type="button" id="mPlayPause" class="m-icon-btn m-play-btn" aria-label="Pause playback" aria-pressed="true">⏸</button>
+    <span id="mClockText" class="m-clock" aria-live="off">--/-- --:--:--Z</span>
+    <button type="button" id="mConnDot" class="m-conn-dot" data-state="idle" aria-label="Check internet connection" title="Connection status"></button>
+    <button type="button" id="mLiveBadge" class="m-live-badge" hidden></button>
+    <div class="m-top-actions">
+      <button type="button" id="mModeToggle" class="m-icon-btn" aria-label="Toggle 2D/3D">2D</button>
+      <button type="button" id="mSheetToggle" class="m-icon-btn" aria-label="Toggle satellite panel">☰</button>
+    </div>
+  </header>
+
+  <section id="mSheet" class="sheet-peek" aria-label="Satellite panel">
+    <button type="button" id="mSheetHandle" class="m-sheet-handle" aria-label="Drag sheet"></button>
+    <div class="m-sheet-body">
+      <section class="m-section" id="mPlaybackSection">
+        <h2 class="m-section-title">Playback</h2>
+        <div class="m-speed-row" role="group" aria-label="Playback speed">
+          <button type="button" data-speed="1"   class="m-speed-pill" aria-pressed="true">1×</button>
+          <button type="button" data-speed="10"  class="m-speed-pill" aria-pressed="false">10×</button>
+          <button type="button" data-speed="60"  class="m-speed-pill" aria-pressed="false">60×</button>
+          <button type="button" data-speed="360" class="m-speed-pill" aria-pressed="false">360×</button>
+        </div>
+        <div class="m-reftime-row">
+          <label class="m-reftime-label" for="mRefTime">Reference Time (UTC)</label>
+          <div class="m-reftime-controls">
+            <input type="datetime-local" id="mRefTime" step="60">
+            <button type="button" id="mApplyRef" class="m-icon-btn m-icon-btn-compact">Apply</button>
+            <button type="button" id="mNowBtn" class="m-icon-btn m-icon-btn-compact">NOW</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="m-section" id="mConnTleSection">
+        <div class="m-section-header">
+          <h2 class="m-section-title">Connection &amp; TLE</h2>
+          <span id="mConnPill" class="m-conn-pill" hidden></span>
+        </div>
+        <div class="m-conn-row">
+          <button type="button" id="mConnCheckBtn" class="m-icon-btn">
+            <span id="mConnInline" class="m-conn-inline" data-state="idle"></span>
+            <span id="mConnLabel">Check Connection</span>
+          </button>
+        </div>
+        <div class="m-conn-row m-conn-row-pair">
+          <button type="button" id="mRefreshFocusedBtn" class="m-icon-btn" disabled title="Refresh focused satellite's TLE">Refresh focused</button>
+          <button type="button" id="mFetchAllBtn" class="m-icon-btn" disabled title="Refresh every satellite that has a NORAD ID">Fetch all</button>
+        </div>
+        <div id="mBatchProgress" class="m-batch-progress" hidden>
+          <div class="m-batch-bar"><div id="mBatchBarFill" class="m-batch-bar-fill"></div></div>
+          <div class="m-batch-row">
+            <span id="mBatchLabel" class="m-batch-label">0 / 0</span>
+            <button type="button" id="mBatchCancelBtn" class="m-icon-btn m-icon-btn-compact">Cancel</button>
+          </div>
+        </div>
+        <div id="mConnStatus" class="m-conn-status" role="status" aria-live="polite" hidden></div>
+      </section>
+
+      <section class="m-section" id="mSatSection">
+        <h2 class="m-section-title">Satellites</h2>
+        <div id="mSatList" class="m-chip-list" role="group" aria-label="Satellite selector"></div>
+      </section>
+
+      <section class="m-section" id="mFocusedSection" hidden>
+        <h2 class="m-section-title">Focused TLE</h2>
+        <div id="mFocusedCard" class="m-card"></div>
+      </section>
+
+      <section class="m-section" id="mPassesSection">
+        <h2 class="m-section-title">Next Passes</h2>
+        <div id="mPassesList" class="m-pass-list" aria-live="polite"></div>
+      </section>
+    </div>
+  </section>
+
+  <div id="mToast" class="m-toast" role="status" aria-live="polite" hidden></div>
+  <div id="mSrLive" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

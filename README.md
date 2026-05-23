@@ -84,9 +84,11 @@ The same codebase ships a static-only demo build that runs without the Express +
 Build it locally (relative-base output, works under any sub-path):
 
 ```bash
-VITE_BACKEND=local VITE_BASE=./ npm run build
-npx vite preview
+npm run build:demo
+npm run preview:demo
 ```
+
+`build:demo` uses `cross-env` to set `VITE_BACKEND=local VITE_BASE=./` for you — running plain `npm run build` produces the self-hosted desktop bundle instead and the mobile entry will try to call `/api/*` (502s with no backend), so always use `build:demo` for the static-only deploy.
 
 The demo build has no Node.js or SQLite dependency at runtime — `dist/` is just static HTML/JS/CSS/textures and can be served from any static host (GitHub Pages, Netlify, Cloudflare Pages, S3, …). The relative-base build means you don't have to know the deploy URL at build time.
 

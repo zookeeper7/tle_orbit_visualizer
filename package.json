@@ -7,7 +7,11 @@
     "dev": "vite",
     "server": "node server.js",
     "build": "vite build",
-    "preview": "vite preview"
+    "build:demo": "cross-env VITE_BACKEND=local VITE_BASE=./ vite build",
+    "preview": "vite preview",
+    "preview:demo": "vite preview --port 4173",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [
     "TLE",
@@ -27,6 +31,9 @@
     "vite-plugin-cesium": "^1.2.23"
   },
   "devDependencies": {
-    "esbuild": "^0.27.4"
+    "cross-env": "^7.0.3",
+    "esbuild": "^0.27.4",
+    "jsdom": "^25.0.1",
+    "vitest": "^2.1.9"
   }
 }
