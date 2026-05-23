@@ -4,6 +4,8 @@ Satellite communication schedule management system built with CesiumJS, satellit
 
 Multi-satellite 3D/2D orbit visualization, automatic pass-schedule computation across multiple ground stations with per-antenna conflict detection, on-the-fly TLE generation from three sources, and screen recording — all in a single vanilla-JS web app.
 
+> **Live demo:** **<https://zookeeper7.github.io/tle_orbit_visualizer/>** — runs entirely in your browser, no backend required. See [Live Demo (Browser-only Mode)](#live-demo-browser-only-mode) below for what's different from the self-hosted build.
+
 ![Main view — 3D globe with multi-satellite orbits, ground stations, and pass schedule](images/main_view.png)
 
 ## Features
@@ -70,6 +72,23 @@ npm run build    # outputs to dist/
 npm run server   # serve API
 # Serve dist/ with any static file server, proxy /api to :3001
 ```
+
+## Live Demo (Browser-only Mode)
+
+The same codebase ships a static-only demo build that runs without the Express + SQLite server. The Vite build is given `VITE_BACKEND=local`, which swaps the REST client out for a localStorage adapter (`src/core/api-local.js`). Seed data — groups, preset satellites, demo ground stations, antenna→satellite mappings — is identical to `server.js`'s `seedDefaults()`, so the first-load UX matches the self-hosted build.
+
+**Per-visitor isolation.** Each browser gets its own private copy of the data in `localStorage`, scoped to `(origin, browser profile)`. One visitor's edits never reach another visitor. Incognito sessions, other browsers, and other devices each start from the seed defaults. Clearing the site's storage resets everything.
+
+**Hosted on GitHub Pages.** Every push to `main` rebuilds and republishes the demo via [`.github/workflows/deploy-demo.yml`](.github/workflows/deploy-demo.yml). On a fresh fork, enable it via **Settings → Pages → Source: GitHub Actions**.
+
+Build it locally (relative-base output, works under any sub-path):
+
+```bash
+VITE_BACKEND=local VITE_BASE=./ npm run build
+npx vite preview
+```
+
+The demo build has no Node.js or SQLite dependency at runtime — `dist/` is just static HTML/JS/CSS/textures and can be served from any static host (GitHub Pages, Netlify, Cloudflare Pages, S3, …). The relative-base build means you don't have to know the deploy URL at build time.
 
 ## Project Structure
 
