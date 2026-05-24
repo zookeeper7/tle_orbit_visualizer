@@ -1000,6 +1000,8 @@ batch 진행 중에는 `N / total` 진척도와 누적 에러 카운트가 표�
 ##### SATELLITES
 preset 위성 chip 목록 (그룹 별 정렬). 색상 점 + 이름. 탭하면 해당 위성이 **focused** 가 되어 궤적이 그려지고 Next Passes 가 계산됩니다. 다시 탭하면 해제.
 
+**첫 방문 시 기본 선택**: 데스크탑과 동일하게 **ISS (focused) + Sentinel-1A + Sentinel-3A** 가 자동으로 가시화됩니다 (`DEFAULT_SAT_IDS` / `DEFAULT_FOCUS_ID` in `src/mobile/mobile-main.js`). 두 번째 방문부터는 마지막에 focused 였던 위성이 `mobileFocusedSat` setting 으로 복원되어 그 위성만 표시됩니다.
+
 ##### FOCUSED TLE
 현재 focused 위성의 NORAD, group, 그리고 line0 / line1 / line2 TLE (read-only). 모바일에서 TLE 편집 UI 는 제공하지 않으며, 편집은 데스크탑 Configuration 탭에서 합니다.
 

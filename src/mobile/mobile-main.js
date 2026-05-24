@@ -81,6 +81,14 @@ let focusedSatId = null;
 let referenceDate = null;
 
 const SHEET_STATES = ['sheet-peek', 'sheet-half', 'sheet-full'];
+
+// First-visit default satellite selection. Mirrors orbit-viewer.js's
+// DEFAULT_SAT_IDS / DEFAULT_FOCUS_ID so the mobile and desktop landing
+// pages look the same on a freshly-cleared browser profile. If the
+// user has already focused something on a previous visit, the
+// `mobileFocusedSat` setting wins and this default is skipped.
+const DEFAULT_SAT_IDS = ['iss', 'sentinel1a', 'sentinel3a'];
+const DEFAULT_FOCUS_ID = 'iss';
 let sheetStateIdx = 0;
 let toastTimer = null;
 let clockDisplayHandle = null;
@@ -132,16 +140,42 @@ async function bootstrap() {
   // patches inside loadInitialData() (those have already painted the UI).
   subscribeSatellitesSlice();
 
-  // Restore last focused satellite (if any).
+  // Restore last focused satellite, or fall back to the same default
+  // selection desktop uses on a first visit (ISS + Sentinel-1A +
+  // Sentinel-3A, focused on ISS) so the mobile landing page is never
+  // blank on a fresh browser profile.
+  let restoredFromSetting = false;
   try {
     const saved = await getSetting('mobileFocusedSat');
     if (saved && typeof saved.satId === 'string') {
       const stillExists = satellitesList.some((s) => s.id === saved.satId);
       if (stillExists) {
         await toggleSatellite(saved.satId, /* makeFocused */ true);
+        restoredFromSetting = true;
       }
     }
   } catch (_) { /* missing setting is fine */ }
+
+  if (!restoredFromSetting) {
+    const available = DEFAULT_SAT_IDS.filter(
+      (id) => satellitesList.some((s) => s.id === id),
+    );
+    if (available.length > 0) {
+      const focusId = available.includes(DEFAULT_FOCUS_ID)
+        ? DEFAULT_FOCUS_ID
+        : available[0];
+      // Add the non-focus defaults first so each toggleSatellite call
+      // doesn't fight the focus state, then call once more with
+      // makeFocused=true on the primary so the camera + Next Passes +
+      // saved-setting side effects fire exactly once.
+      for (const id of available) {
+        if (id === focusId) continue;
+        // eslint-disable-next-line no-await-in-loop
+        await toggleSatellite(id, /* makeFocused */ false);
+      }
+      await toggleSatellite(focusId, /* makeFocused */ true);
+    }
+  }
 }
 
 /**
