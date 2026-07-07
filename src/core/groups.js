@@ -65,6 +65,41 @@ export function isGroupSchedulable(groupId) {
 }
 
 /**
+ * Filter satellite ids down to those eligible to remain ACTIVELY selected in a
+ * viewer — i.e. eligible to keep an orbit trail and pass-schedule rows. A
+ * satellite qualifies when it exists, is enabled, and belongs to a schedulable
+ * group. This mirrors the Orbit Viewer / Schedule Manager selector filters so
+ * the selector, the 3D trail, and the pass schedule stay in lock-step.
+ *
+ * Ids listed in `allow` bypass the enabled + schedulable checks (but NOT the
+ * existence check). This is for internally-injected satellites such as the
+ * Orbit Viewer's Interactive Keplerian, which lives in the non-schedulable
+ * 'custom' group yet must still render.
+ *
+ * Accepts either store-shaped sats ({ groupName }) or Orbit-Viewer-shaped sats
+ * ({ group }). Group schedulability is read live from the app-store.
+ *
+ * @param {Iterable<string>} ids
+ * @param {Record<string, {enabled?:boolean, groupName?:string, group?:string}>} satellitesById
+ * @param {{allow?: Iterable<string>}} [opts]
+ * @returns {string[]}
+ */
+export function filterSelectableSatelliteIds(ids, satellitesById, opts = {}) {
+  const allow = new Set(opts.allow || []);
+  const byId = satellitesById || {};
+  const out = [];
+  for (const id of ids || []) {
+    const sat = byId[id];
+    if (!sat) continue;                    // deleted / unknown
+    if (allow.has(id)) { out.push(id); continue; } // injected special (e.g. interactive)
+    if (sat.enabled === false) continue;   // disabled in Configuration
+    const group = sat.groupName ?? sat.group;
+    if (isGroupSchedulable(group)) out.push(id); // group made non-schedulable → drop
+  }
+  return out;
+}
+
+/**
  * Return groups sorted by (sortOrder asc, name asc).
  * Result is a plain array; caller is responsible for mapping to UI.
  * @returns {Array<{id:string,name:string,label:string,color:string,sortOrder:number,schedulable:boolean}>}

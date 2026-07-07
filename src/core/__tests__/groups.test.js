@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { getState, patch } from '../app-store.js';
-import { findGroup, getGroupLabel, isGroupSchedulable, getSortedGroups } from '../groups.js';
+import { findGroup, getGroupLabel, isGroupSchedulable, getSortedGroups, filterSelectableSatelliteIds } from '../groups.js';
 
 /**
  * Replace the whole `groups` slice (the store shallow-merges object slices, so
@@ -109,5 +109,57 @@ describe('getSortedGroups', () => {
     setGroups({});
     expect(getSortedGroups()).toEqual([]);
     expect(getState().groups).toEqual({});
+  });
+});
+
+describe('filterSelectableSatelliteIds', () => {
+  // groupName references a group NAME (as satellites do); 'general' + 'Weather Sats'
+  // are schedulable, 'Archived Fleet' is not, 'custom' does not exist (→ non-schedulable).
+  const SATS = {
+    s1: { id: 's1', enabled: true, groupName: 'general' },          // enabled + schedulable
+    s2: { id: 's2', enabled: false, groupName: 'general' },         // disabled
+    s3: { id: 's3', enabled: true, groupName: 'Archived Fleet' },   // non-schedulable group
+    s4: { id: 's4', enabled: true, groupName: 'Weather Sats' },     // schedulable (id !== name)
+    s5: { id: 's5', enabled: true, group: 'general' },              // Orbit-Viewer shape (.group)
+    interactive_kep: { id: 'interactive_kep', enabled: true, groupName: 'custom' },
+  };
+
+  it('keeps enabled satellites in schedulable groups (both sat shapes)', () => {
+    expect(filterSelectableSatelliteIds(['s1', 's4', 's5'], SATS)).toEqual(['s1', 's4', 's5']);
+  });
+
+  it('drops disabled satellites', () => {
+    expect(filterSelectableSatelliteIds(['s1', 's2'], SATS)).toEqual(['s1']);
+  });
+
+  it('drops satellites whose group is not schedulable', () => {
+    expect(filterSelectableSatelliteIds(['s1', 's3'], SATS)).toEqual(['s1']);
+  });
+
+  it('drops ids missing from the store (deleted)', () => {
+    expect(filterSelectableSatelliteIds(['s1', 'ghost'], SATS)).toEqual(['s1']);
+  });
+
+  it('drops an injected sat in a non-schedulable group by default', () => {
+    expect(filterSelectableSatelliteIds(['interactive_kep'], SATS)).toEqual([]);
+  });
+
+  it('keeps an allow-listed injected sat even in a non-schedulable group', () => {
+    expect(filterSelectableSatelliteIds(['interactive_kep'], SATS, { allow: ['interactive_kep'] }))
+      .toEqual(['interactive_kep']);
+  });
+
+  it('allow-list still respects existence (a missing allowed id is dropped)', () => {
+    expect(filterSelectableSatelliteIds(['ghost'], SATS, { allow: ['ghost'] })).toEqual([]);
+  });
+
+  it('preserves input order and only keeps eligible ids', () => {
+    expect(filterSelectableSatelliteIds(['s3', 's1', 's2', 's4'], SATS)).toEqual(['s1', 's4']);
+  });
+
+  it('handles empty / null inputs gracefully', () => {
+    expect(filterSelectableSatelliteIds([], {})).toEqual([]);
+    expect(filterSelectableSatelliteIds(null, null)).toEqual([]);
+    expect(filterSelectableSatelliteIds(new Set(['s1']), SATS)).toEqual(['s1']);
   });
 });

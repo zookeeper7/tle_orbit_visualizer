@@ -17,7 +17,7 @@ import { computePasses } from '../pass-prediction.js';
 import { getState, patch, subscribe } from '../core/app-store.js';
 import { getSetting, putSetting, updateSatellite, createSatellite, deleteSatellite } from '../core/api.js';
 import { classicalElementsToTLE } from '../separation-vector.js';
-import { getGroupLabel, isGroupSchedulable } from '../core/groups.js';
+import { getGroupLabel, isGroupSchedulable, filterSelectableSatelliteIds } from '../core/groups.js';
 
 /**
  * Initialize the Orbit Viewer tab.
@@ -211,6 +211,63 @@ export function initOrbitViewer(viewer) {
     // focused satellite (even if TLE parsing above threw).
     updateTrackButton();
     renderSatelliteSelector();
+  }
+
+  /**
+   * Is this satellite id currently eligible to stay selected (and thus keep its
+   * orbit trail + pass-schedule rows)? Mirrors the overlay selector's own filter
+   * (enabled + schedulable group), with the injected Interactive Keplerian
+   * satellite exempted so it keeps rendering despite living in the
+   * non-schedulable 'custom' group.
+   * @param {string} id
+   * @returns {boolean}
+   */
+  function isSelectableSatId(id) {
+    return filterSelectableSatelliteIds([id], satById, { allow: [INT_SAT_ID] }).length === 1;
+  }
+
+  /**
+   * Reconcile the Orbit Viewer's local selection / focus / tracking with the
+   * store after satellites or groups change in Configuration. Drops satellites
+   * that were disabled, deleted, or moved to a non-schedulable group so their
+   * orbit trails and pass-schedule rows disappear in lock-step with the overlay
+   * selector. Mutates local state ONLY — the caller re-renders (selector +
+   * visualize). Does not call focusSatellite() (which would re-render mid-
+   * reconcile); visualize() repaints the focused satellite's info panel instead.
+   * @returns {boolean} true if the selection set changed
+   */
+  function reconcileSelection() {
+    const keep = new Set(filterSelectableSatelliteIds(selectedSatIds, satById, { allow: [INT_SAT_ID] }));
+    let changed = false;
+
+    for (const id of [...selectedSatIds]) {
+      if (!keep.has(id)) { selectedSatIds.delete(id); changed = true; }
+    }
+
+    // Stop camera tracking if its target is no longer in the active selection.
+    if (customTrackingSatId && !selectedSatIds.has(customTrackingSatId)) {
+      stopCustomTracking();
+    }
+
+    // Repair focus if the focused satellite is no longer selectable.
+    if (focusedSatId && !isSelectableSatId(focusedSatId)) {
+      const nextFocus = selectedSatIds.values().next().value || null;
+      if (nextFocus) {
+        focusedSatId = nextFocus;
+        const sat = satById[nextFocus];
+        if (sat) {
+          ovFocusedSatLabel.textContent = sat.name;
+          tleInput.value = tleBySatId[nextFocus] || sat.tle;
+        }
+      } else {
+        focusedSatId = null;
+        ovFocusedSatLabel.textContent = '\u2014';
+        if (updateInterval) { clearInterval(updateInterval); updateInterval = null; }
+        satelliteInfo.style.display = 'none';
+      }
+    }
+
+    return changed;
   }
 
   // ─── Event Handlers ───
@@ -1188,6 +1245,19 @@ export function initOrbitViewer(viewer) {
 
     const satIds = Array.from(selectedSatIds);
     if (satIds.length === 0) {
+      // Nothing selected — e.g. the last selected satellite was just disabled or
+      // moved to a non-schedulable group in Configuration. Clear the scene + pass
+      // schedule so stale orbit trails / passes don't linger, and release the
+      // camera + live-update timers.
+      clearVisualization(viewer);
+      if (customTrackingSatId) stopCustomTracking();
+      if (updateInterval) { clearInterval(updateInterval); updateInterval = null; }
+      currentSatrec = null;
+      currentPasses = [];
+      if (schedBody) schedBody.innerHTML = '';
+      if (schedCount) schedCount.textContent = '0';
+      if (schedTable) schedTable.style.display = 'none';
+      if (schedEmpty) schedEmpty.style.display = '';
       showError('Select at least one satellite to visualize.');
       return;
     }
@@ -1906,7 +1976,10 @@ export function initOrbitViewer(viewer) {
     try {
       const data = await getSetting('orbit-selection');
       if (Array.isArray(data?.satelliteIds) && data.satelliteIds.length > 0) {
-        return data.satelliteIds.filter(id => satById[id]);
+        // Only restore satellites that are still selectable (exist, enabled,
+        // schedulable group). Fall back to defaults when none remain eligible.
+        const eligible = data.satelliteIds.filter(id => isSelectableSatId(id));
+        if (eligible.length > 0) return eligible;
       }
     } catch (error) {
       console.warn('Failed to load Orbit Viewer defaults:', error);
@@ -1918,7 +1991,7 @@ export function initOrbitViewer(viewer) {
   if (ovSaveSelBtn) ovSaveSelBtn.addEventListener('click', () => saveSelection());
   if (ovResetSelBtn) ovResetSelBtn.addEventListener('click', async () => {
     const saved = await loadSelection();
-    const ids = saved || DEFAULT_SAT_IDS.filter(id => satById[id]);
+    const ids = saved || DEFAULT_SAT_IDS.filter(id => isSelectableSatId(id));
     selectedSatIds.clear();
     for (const id of ids) selectedSatIds.add(id);
     focusedSatId = selectedSatIds.has(DEFAULT_FOCUS_ID) ? DEFAULT_FOCUS_ID : (ids[0] || null);
@@ -1930,7 +2003,7 @@ export function initOrbitViewer(viewer) {
   // ─── Initialize ───
   async function initializeSelection() {
     const saved = await loadSelection();
-    const ids = saved || DEFAULT_SAT_IDS.filter(id => satById[id]);
+    const ids = saved || DEFAULT_SAT_IDS.filter(id => isSelectableSatId(id));
 
     selectedSatIds.clear();
     for (const id of ids) selectedSatIds.add(id);
@@ -1953,6 +2026,11 @@ export function initOrbitViewer(viewer) {
 
     subscribe('satellites', () => {
       rebuildSatelliteData();
+      // Drop satellites disabled / deleted / moved to a non-schedulable group in
+      // Configuration from the selection, focus, and camera tracking so their
+      // orbit trails + pass-schedule rows disappear together with their selector
+      // entry (keeps the selector, the 3D scene, and the schedule in sync).
+      reconcileSelection();
       renderSatelliteSelector();
       // Re-visualize to pick up color/enabled changes from Configuration
       if (getState().ui?.activeTab === 'orbit-viewer') {
@@ -1963,7 +2041,17 @@ export function initOrbitViewer(viewer) {
     });
 
     subscribe('groups', () => {
+      // A group's schedulable flag affects selection eligibility. Reconcile the
+      // selection; only re-visualize when it actually changed (a plain refreshAll
+      // re-publishes the groups slice unchanged, so avoid redundant re-propagation).
+      const changed = reconcileSelection();
       renderSatelliteSelector();
+      if (!changed) return;
+      if (getState().ui?.activeTab === 'orbit-viewer') {
+        visualize({ skipZoom: true });
+      } else {
+        satellitesChangedWhileHidden = true;
+      }
     });
 
     subscribe('ui', (ui) => {
