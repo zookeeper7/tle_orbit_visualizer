@@ -1296,10 +1296,13 @@ export function initOrbitViewer(viewer) {
           //       TLE) → start tracking unconditionally so the user
           //       lands on a clear "follow the satellite" view instead
           //       of an ambiguous mid-distance zoom.
-          //   (c) Neither → just zoom to the entity once and leave
-          //       the camera under user control. Automatic tracking on
-          //       every re-visualize used to surprise users with a
-          //       "snapped-to-satellite" view they never asked for.
+          //   (c) Neither (Visualize All / Reset) → fly to Cesium's
+          //       default home view so the whole globe and the full
+          //       orbit trail stay visible, exactly like the
+          //       multi-satellite case below. The old zoomTo() framed a
+          //       single satellite's (near-point) entity bounding sphere,
+          //       dropping the camera into an ambiguous close-up where
+          //       the orbit was not visible and no tracking was active.
           const onlyEntity = entities[0];
           const onlySatId = Object.keys(satById).find((id) => satById[id].name === onlyEntity.name);
           const wasTrackingThisSat = onlySatId && customTrackingSatId === onlySatId;
@@ -1309,7 +1312,7 @@ export function initOrbitViewer(viewer) {
             // If we were tracking some OTHER satellite that's no longer
             // in the scene, release that camera lock.
             if (customTrackingSatId) stopCustomTracking();
-            viewer.zoomTo(onlyEntity, new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), currentAvgAltKm ? currentAvgAltKm * 8000 : 8_000_000));
+            viewer.camera.flyHome(1.5);
           }
         } else if (entities.length > 1) {
           // Two sub-cases when more than one satellite is on screen:
