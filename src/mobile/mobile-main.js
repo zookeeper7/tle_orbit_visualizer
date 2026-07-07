@@ -505,6 +505,7 @@ async function handleFetchAll() {
   let done = 0;
   let ok = 0;
   let fail = 0;
+  let rateLimitedStop = false;
   const updateProgress = () => {
     if (labelEl) labelEl.textContent = formatBatchLabel(done, eligible.length);
     if (fillEl) fillEl.style.width = `${formatBatchPercent(done, eligible.length)}%`;
@@ -522,6 +523,9 @@ async function handleFetchAll() {
     } catch (err) {
       setChipFetchState(sat.id, 'error');
       fail += 1;
+      // CelesTrak rate limit (HTTP 403): abort the whole batch so we don't keep
+      // hammering CelesTrak into a firewall block.
+      if (err && err.isRateLimited) { rateLimitedStop = true; batchAbort?.abort(); }
       throw err;
     } finally {
       done += 1;
@@ -543,7 +547,9 @@ async function handleFetchAll() {
   // Linger at 100% for 1s so the user sees completion, then hide.
   setTimeout(() => { if (progressEl) progressEl.hidden = true; }, 1000);
 
-  if (wasAborted) {
+  if (rateLimitedStop) {
+    showMobileConnStatus(`Stopped: CelesTrak rate limit (HTTP 403). ${ok} updated. GP data updates every 2h.`, 'error');
+  } else if (wasAborted) {
     showMobileConnStatus(`Cancelled. ${ok} updated, ${fail} failed, ${eligible.length - done} skipped.`, 'info');
   } else if (fail === 0) {
     showMobileConnStatus(`Refreshed ${ok} satellites.`, 'success');

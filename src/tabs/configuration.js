@@ -533,6 +533,7 @@ export function initConfiguration() {
 
       let updatedCount = 0;
       let failedCount = 0;
+      let rateLimited = false;
 
       for (const sat of satellites) {
         try {
@@ -555,11 +556,18 @@ export function initConfiguration() {
         } catch (error) {
           console.warn(`Failed TLE fetch for ${sat.id}:`, error);
           failedCount += 1;
+          // CelesTrak rate limit (HTTP 403): stop the batch so we don't keep
+          // hammering CelesTrak into a firewall block.
+          if (error && error.isRateLimited) { rateLimited = true; break; }
         }
       }
 
       await refreshAll();
-      window.alert(`Fetch complete. Updated: ${updatedCount}, Failed: ${failedCount}`);
+      window.alert(
+        rateLimited
+          ? `Stopped: CelesTrak rate limit reached (HTTP 403). Updated ${updatedCount} before stopping. GP data updates every 2h — try again later.`
+          : `Fetch complete. Updated: ${updatedCount}, Failed: ${failedCount}`,
+      );
     } catch (error) {
       console.error('Failed fetching all TLEs:', error);
       window.alert(error instanceof Error ? error.message : 'Failed to fetch all TLEs.');

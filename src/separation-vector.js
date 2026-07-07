@@ -18,6 +18,7 @@
  */
 
 import * as satellite from 'satellite.js';
+import { alpha5Encode } from './gp.js';
 
 const MU_EARTH = 398600.4418;     // km^3 / s^2
 const EARTH_OMEGA = 7.2921159e-5;  // rad/s
@@ -188,7 +189,8 @@ export function keplerianToTLE(elements, utcDate, options = {}) {
   const dayOfYear = (utcDate.getTime() - startOfYear) / 86400000 + 1;
   const epochStr = `${pad2(yearTwoDigit)}${dayOfYear.toFixed(8).padStart(12, '0')}`;
 
-  const noradStr = String(noradId).padStart(5, '0');
+  // Alpha-5 encode so catalog numbers 100000–339999 fit the 5-char TLE field.
+  const noradStr = alpha5Encode(noradId);
   const intlStr = (intlDesignator || '').padEnd(8).substring(0, 8);
 
   // Mean motion derivative (set to 0 — we don't model decay from a single state)

@@ -53,7 +53,7 @@ TLE Visualize는 **TLE 기반 위성 궤도 시각화 + 다위성 교신 스케�
 | **백엔드** | Node.js, Express 5 |
 | **데이터베이스** | SQLite (better-sqlite3) |
 | **궤도 계산** | satellite.js (SGP4 전파) |
-| **TLE 소스** | CelesTrak GP API (NORAD/Space-Track 기반) |
+| **TLE 소스** | CelesTrak GP API — OMM(JSON) 수신 후 TLE 변환 (NORAD/Space-Track 기반) |
 
 ---
 
@@ -71,7 +71,7 @@ TLE Visualize
 │   └── SQLite DB  — data/schedule.db
 │
 └── 외부 연동
-    └── CelesTrak GP API — TLE 조회 / 검색
+    └── CelesTrak GP API — OMM(JSON) 조회 / 검색 (2시간 캐시)
 ```
 
 ### 디렉토리 구조
@@ -89,7 +89,9 @@ TLE Visualize
 │   ├── visualization.js   — Cesium 엔티티 생성 (테이퍼 궤적, 고해상도 라벨)
 │   ├── pass-prediction.js — 교신 시간 계산 (방위각 마스크 지원)
 │   ├── separation-vector.js — ECEF 상태벡터 / 6 고전요소 → TLE 변환
-│   ├── tle-fetch.js       — CelesTrak GP API 통신 (fetch + 이름/NORAD 검색)
+│   ├── gp.js              — CelesTrak OMM(GP) → 레거시 TLE 변환, Alpha-5 catalog 인코딩
+│   ├── core/celestrak-cache.js — GP/OMM fetch 2시간 캐시 (NORAD 번호 키)
+│   ├── tle-fetch.js       — CelesTrak GP API 통신 (OMM/JSON fetch, 2시간 캐시, 이름/NORAD 검색)
 │   ├── presets.js         — 기본 위성 프리셋
 │   ├── ground-stations.js — 기본 지상국 데이터
 │   ├── core/
@@ -238,7 +240,7 @@ npm run server     # 백엔드 유지
 | 버튼 | 기능 |
 |---|---|
 | **Check Connection** | CelesTrak 서버 연결 상태 확인 |
-| **Fetch Latest TLE** | 포커스된 위성의 최신 TLE를 CelesTrak에서 조회 → 서버 DB에 저장 |
+| **Fetch Latest TLE** | 포커스된 위성의 최신 GP 데이터를 CelesTrak에서 OMM(JSON)으로 조회 → TLE 변환 후 서버 DB에 저장 (NORAD 번호별 2시간 캐시 적용) |
 
 #### Auto Refresh TLE
 
@@ -247,6 +249,8 @@ npm run server     # 백엔드 유지
 - 활성화 즉시 1회 fetch 실행
 - 각 fetch 성공 후 store 갱신 → 궤적과 Pass Schedule이 자동 재렌더 (카메라는 유지)
 - 상태 표시: `14:30 UTC · 5ok`
+- **2시간 캐시**: CelesTrak GP 데이터는 약 2시간마다 갱신되므로, 30분·1시간 주기를 선택해도 실제 네트워크 요청은 catalog 번호별로 최대 2시간에 한 번만 발생합니다 (나머지는 캐시 반환).
+- **레이트리밋 자동 중단**: CelesTrak이 HTTP 403(속도 제한)을 반환하면 일괄 fetch를 중단하고 **Auto Refresh를 자동으로 끕니다** — CelesTrak 방화벽 차단을 방지하기 위함입니다.
 
 #### Focused Satellite TLE 편집
 
@@ -462,7 +466,7 @@ npm run server     # 백엔드 유지
 
 #### Fetch All TLEs
 
-NORAD ID가 있는 모든 활성 위성의 TLE을 CelesTrak에서 일괄 갱신합니다.
+NORAD ID가 있는 모든 활성 위성의 GP 데이터를 CelesTrak에서 OMM(JSON)으로 일괄 조회 → TLE 변환 후 갱신합니다. **HTTP 403(레이트리밋)** 발생 시 즉시 중단하고 몇 개까지 갱신됐는지 안내합니다.
 
 > **주의**: CelesTrak은 미군 Space-Track 데이터를 사용합니다. 운영기관이 자체 추적으로 생성한 TLE와 다를 수 있으며, 이 차이로 인해 pass 예측 시간이 수 분 차이날 수 있습니다.
 
@@ -720,7 +724,7 @@ TLE(Two-Line Element Set)는 인공위성의 궤도를 기술하는 표준 형�
 
 | 소스 | 설명 | 사용 방법 |
 |---|---|---|
-| **CelesTrak (NORAD)** | 미군 Space-Track 기반, 공개 TLE | Fetch Latest TLE / Fetch All TLEs / Auto Refresh |
+| **CelesTrak (NORAD)** | 미군 Space-Track 기반 공개 GP 데이터 (OMM/JSON 수신 → TLE 변환) | Fetch Latest TLE / Fetch All TLEs / Auto Refresh |
 | **기관 자체 TLE** | 운영기관의 자체 궤도결정 결과 | Configuration에서 수동 입력 |
 | **임의 TLE (분리 벡터)** | 발사 직후 상태벡터로부터 생성 | Configuration → Add Satellite → Separation Vector 폼 |
 | **임의 TLE (6 요소)** | 6 고전 궤도요소로부터 생성 | Configuration → Add Satellite → Classical Orbital Elements 폼 |
@@ -737,7 +741,7 @@ TLE는 시간이 지나면 정확도가 떨어집니다.
 | **7~14일** | 수십 km | 2~5분 |
 | **30일 이상** | 수백 km | 부정확 |
 
-> **권장**: 운영 용도에서는 Auto Refresh를 1시간 주기로 켜두거나, 최소 매일 Fetch All TLEs를 실행하세요.
+> **권장**: CelesTrak GP는 약 2시간마다 갱신되므로 Auto Refresh는 **2시간 주기**면 충분합니다 (앱의 2시간 캐시가 더 잦은 요청을 자동으로 억제). 더 짧은 주기를 선택해도 실제 다운로드는 catalog 번호별로 2시간에 한 번입니다.
 
 ### 9.4 NORAD TLE vs 기관 TLE
 
@@ -753,6 +757,16 @@ CelesTrak에서 제공하는 TLE(NORAD)와 운영기관이 자체 추적으로 �
 - 분리 벡터 / 6 고전요소 / Interactive Slider로 생성된 TLE는 **osculating Keplerian elements** 기준입니다.
 - SGP4 자체는 **mean elements** 모델 — 둘 사이에는 short-period 편차가 존재 (수 ~ 수십 m / 0.01%~0.05% 수준).
 - 시각화 및 단기 시연 용도로는 충분히 정확합니다. 운영급 정밀도가 필요하면 Brouwer-Lyddane mean conversion이 필요하나 현재 미지원.
+
+### 9.6 CelesTrak GP 포맷 (OMM) 및 6자리 catalog 번호
+
+CelesTrak은 5자리 catalog 번호 공간이 소진(약 2026-07, 69999)됨에 따라 고정폭 **TLE 포맷을 단계적으로 폐지**하고 있습니다. 이후 객체는 6자리 이상 번호를 받으며 `FORMAT=TLE` 조회로는 반환되지 않습니다. 이 앱은 이에 대응하여 CelesTrak을 **OMM(JSON, `FORMAT=JSON`)** 으로 조회합니다.
+
+- **레거시 호환**: 수신한 OMM은 즉시 레거시 3줄 TLE로 변환되어(`src/gp.js`) 기존 저장/전파(SGP4) 파이프라인이 그대로 동작합니다. 수동 TLE 붙여넣기·프리셋도 변함없이 지원됩니다.
+- **Alpha-5 인코딩**: catalog 번호 100000~339999는 5자 필드에 Alpha-5(예: `100000` → `A0000`, `148493` → `E8493`, 최대 `Z9999`)로 인코딩됩니다. `satellite.js`의 `twoline2satrec`는 이를 정상 파싱합니다.
+- **정확도**: OMM→TLE 변환은 SGP4 mean elements를 손실 없이 담으며, 실제 CelesTrak 데이터로 검증 시 `satellite.js`의 `json2satrec` 대비 오차 < 1 m 수준입니다.
+- **2시간 캐시 · 403 처리**: 모든 조회는 NORAD 번호별 2시간 캐시를 거치며, HTTP 403(레이트리밋) 시 일괄 작업을 중단합니다.
+- **한계**: 6자리를 넘는 9자리 애널리스트/SupGP 번호(예: 799xxxxxx)는 TLE 포맷 자체로 표현이 불가능하여 미지원입니다 (CelesTrak의 TLE 포맷도 동일 제약).
 
 ---
 
@@ -918,6 +932,7 @@ Pass Schedule의 행을 클릭하면 해당 pass 시점으로 카메라가 이�
 1. **Check Connection**으로 인터넷 연결 확인
 2. CelesTrak 서버가 일시적으로 불안정할 수 있음 → 잠시 후 재시도
 3. NORAD ID가 없는 위성은 CelesTrak 조회 불가 → 수동/생성기 사용
+4. **HTTP 403(레이트리밋)**: CelesTrak GP는 약 2시간마다만 갱신됩니다. 너무 자주 요청하면 403을 받고 일괄 작업이 중단되며 Auto Refresh가 자동으로 꺼집니다 → **2시간 이상 기다린 후** 재시도하세요 (정상 사용 시 앱의 2시간 캐시가 이를 자동 방지합니다).
 
 ### Configuration에서 변경한 내용이 Orbit Viewer에 반영되지 않음
 

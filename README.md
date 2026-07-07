@@ -26,7 +26,7 @@ Multi-satellite 3D/2D orbit visualization, automatic pass-schedule computation a
 - **Timeline** — Interactive Gantt chart with zoom, scroll, conflict overlays, and bulk pass selection
 
 ### TLE Sources & Generators
-- **CelesTrak / NORAD Fetch** — One-shot or batch fetch for any satellite with a NORAD ID, with optional **Auto Refresh** at 30 min / 1 h / 2 h / 6 h intervals (refreshes orbit + Pass Schedule automatically)
+- **CelesTrak / NORAD Fetch** — One-shot or batch fetch for any satellite with a NORAD ID via the CelesTrak GP API in **OMM (JSON)** format — future-proof now that CelesTrak is retiring the fixed-width TLE format for 6+ digit catalog numbers. Each OMM is converted on the fly to a legacy TLE (with **Alpha-5** encoding for catalog numbers up to 339999), so the whole SGP4 pipeline stays unchanged. Optional **Auto Refresh** at 30 min / 1 h / 2 h / 6 h intervals; a **2-hour client cache** honours CelesTrak's update cadence and batch fetches **stop automatically on an HTTP 403 rate-limit** so you never get firewalled
 - **TLE from Separation Vector** — Convert a launch separation state (WGS84 ECEF position + Earth-relative velocity at UTC) into an SGP4-compatible TLE
 - **TLE from Classical Orbital Elements** — Generate a TLE from the 6 Keplerian elements at a UTC epoch, with osculating → mean conversion verified by SGP4 round-trip
 - **Manual TLE** — Paste any 3-line TLE for satellites not in CelesTrak
@@ -131,6 +131,7 @@ src/
     api.js                   # Frontend REST client (satellites/stations/antennas/mappings/passes/settings)
     azimuth-mask.js          # CSV parser + piecewise-linear interpolation
     conflict-detection.js    # Sorted-sweep per-antenna overlap detection
+    celestrak-cache.js       # 2-hour client cache of GP/OMM fetches (keyed by NORAD catalog number)
     
   tabs/
     orbit-viewer.js          # Orbit Viewer tab — multi-sat overlay, Reference Time, Track, Recording, Interactive Keplerian
@@ -147,7 +148,8 @@ src/
   separation-vector.js       # ECEF state vector & 6 classical Keplerian elements → SGP4 TLE
   ground-stations.js         # Default station definitions
   presets.js                 # Satellite preset TLE data
-  tle-fetch.js               # CelesTrak GP API connectivity (fetch + name/NORAD search)
+  gp.js                      # CelesTrak OMM (GP) → legacy TLE conversion, Alpha-5 catalog encoding, typed errors
+  tle-fetch.js               # CelesTrak GP API (OMM/JSON fetch, 2-hour cache, name/NORAD search)
   style.css                  # Glassmorphism theme
 
 public/
@@ -211,7 +213,7 @@ A minimal seed set is provided so the app is demoable on first run. Both groups 
 - Tab-capture screen recording into WebM at 24 / 30 / 60 fps, captures the whole page including side panels
 
 **TLE management**
-- CelesTrak GP API integration: search by name or NORAD ID, batch refresh, optional auto-refresh on 30 min / 1 h / 2 h / 6 h cadence
+- CelesTrak GP API integration in **OMM (JSON)** format with on-the-fly OMM→TLE conversion (Alpha-5 for 6-digit catalog numbers): search by name or NORAD ID, batch refresh, optional auto-refresh on 30 min / 1 h / 2 h / 6 h cadence — all gated by a 2-hour cache and a 403-aware batch abort that respects CelesTrak's rate limits
 - Three offline TLE generators: launch separation vector, classical orbital elements, and an interactive sliders panel that re-renders live and commits on drag-release
 - Free-form group taxonomy with per-group color, sort order, and a `schedulable` flag that drives whether the group's satellites appear in Schedule Manager / Orbit Viewer
 

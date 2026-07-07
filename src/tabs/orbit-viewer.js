@@ -918,6 +918,7 @@ export function initOrbitViewer(viewer) {
     updateAutoRefreshStatus(`Fetching ${satellites.length}…`);
     let ok = 0;
     let fail = 0;
+    let rateLimited = false;
     for (const sat of satellites) {
       try {
         const tle = await fetchLatestTLE(Number(sat.noradId));
@@ -941,18 +942,30 @@ export function initOrbitViewer(viewer) {
           });
           ok++;
         } else { fail++; }
-      } catch { fail++; }
+      } catch (err) {
+        fail++;
+        // CelesTrak rate limit (HTTP 403): stop the batch AND disable auto refresh
+        // so we don't keep hammering CelesTrak into a firewall block.
+        if (err && err.isRateLimited) { rateLimited = true; break; }
+      }
     }
-    const now = new Date();
-    const hh = String(now.getUTCHours()).padStart(2, '0');
-    const mm = String(now.getUTCMinutes()).padStart(2, '0');
-    updateAutoRefreshStatus(`${hh}:${mm} UTC · ${ok}ok${fail > 0 ? ` ${fail}fail` : ''}`);
 
     // Re-visualize to refresh orbit trails and pass schedule with updated TLEs
     if (ok > 0) {
       rebuildSatelliteData();
       visualize({ skipZoom: true });
     }
+
+    if (rateLimited) {
+      stopAutoRefresh();
+      updateAutoRefreshStatus('Rate-limited by CelesTrak — auto refresh stopped. GP data updates every 2h.');
+      return;
+    }
+
+    const now = new Date();
+    const hh = String(now.getUTCHours()).padStart(2, '0');
+    const mm = String(now.getUTCMinutes()).padStart(2, '0');
+    updateAutoRefreshStatus(`${hh}:${mm} UTC · ${ok}ok${fail > 0 ? ` ${fail}fail` : ''}`);
   }
 
   // ─── Ground Station UI Handlers ───

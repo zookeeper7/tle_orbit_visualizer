@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
 import { DEFAULT_STATIONS } from './src/ground-stations.js';
 import { PRESETS } from './src/presets.js';
 import { parseMaskCSV } from './src/core/azimuth-mask.js';
+import { ommToTLE } from './src/gp.js';
 
 const PORT = 3001;
 const DB_DIR = path.resolve('data');
@@ -992,6 +993,19 @@ async function refreshPresetTlesFromCelesTrak() {
   const presetEntries = Object.entries(PRESETS).filter(([, p]) => p && p.noradId);
   if (presetEntries.length === 0) return;
 
+  // Respect CelesTrak's ~2h GP update cadence: skip re-fetching if we already
+  // refreshed under 2h ago. Without this, frequent restarts would re-download
+  // the same data and risk CelesTrak's rate-limit/firewall policy.
+  const REFRESH_MIN_INTERVAL_MS = 2 * 60 * 60 * 1000;
+  try {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'lastPresetRefresh'").get();
+    const lastAt = row ? Number(safeParseJson(row.value)?.at) : 0;
+    if (Number.isFinite(lastAt) && lastAt > 0 && Date.now() - lastAt < REFRESH_MIN_INTERVAL_MS) {
+      console.log('[seed] CelesTrak refresh skipped (GP data < 2h old)');
+      return;
+    }
+  } catch { /* proceed on any read error */ }
+
   const updateStmt = db.prepare(`
     UPDATE satellites
     SET tle_line0 = ?, tle_line1 = ?, tle_line2 = ?, updated_at = ?
@@ -1023,21 +1037,35 @@ async function refreshPresetTlesFromCelesTrak() {
       failed += 1;
     }
   }
+
+  // Stamp the refresh time so the 2h guard above can throttle future restarts.
+  try {
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+      .run('lastPresetRefresh', JSON.stringify({ at: Date.now() }));
+  } catch { /* non-fatal */ }
+
   console.log(`[seed] CelesTrak background refresh: ${updated} updated, ${failed} failed`);
 }
 
+/**
+ * Fetch one satellite's GP data as an OMM (FORMAT=JSON — forward-compatible with
+ * 6+ digit catalog numbers) and convert it to a legacy 3-line TLE string.
+ */
 async function fetchTleFromCelesTrak(noradId) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10_000);
   try {
     const res = await fetch(
-      `https://celestrak.org/NORAD/elements/gp.php?CATNR=${noradId}&FORMAT=TLE`,
+      `https://celestrak.org/NORAD/elements/gp.php?CATNR=${noradId}&FORMAT=JSON`,
       { signal: controller.signal },
     );
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = (await res.text()).trim();
-    if (!text || text.startsWith('No GP')) throw new Error(`No TLE for NORAD ${noradId}`);
-    return text;
+    if (!text || text.startsWith('No GP') || text === '[]') throw new Error(`No GP data for NORAD ${noradId}`);
+    const data = JSON.parse(text);
+    const omm = Array.isArray(data) ? data[0] : data;
+    if (!omm || omm.NORAD_CAT_ID == null) throw new Error(`No GP data for NORAD ${noradId}`);
+    return ommToTLE(omm).threeLine;
   } finally {
     clearTimeout(timeoutId);
   }
