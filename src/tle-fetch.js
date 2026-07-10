@@ -131,6 +131,70 @@ export async function fetchGP(noradId, opts = {}) {
 }
 
 /**
+ * Fetch an entire CelesTrak GROUP as an array of OMM records
+ * (gp.php?GROUP=...&FORMAT=JSON) — the batch method CelesTrak recommends over
+ * harvesting individual objects. Cache-gated (2h) under a "group:" key so we
+ * respect CelesTrak's update cadence. Returns only records that carry a
+ * NORAD_CAT_ID.
+ *
+ * @param {string} group - a CelesTrak group name (e.g. "stations", "gps-ops")
+ * @param {{ force?: boolean, signal?: AbortSignal }} [opts]
+ * @returns {Promise<Array<Record<string, unknown>>>}
+ * @throws {CelestrakError}
+ */
+export async function fetchGPGroup(group, opts = {}) {
+  const g = String(group == null ? '' : group).trim();
+  if (!g) throw new CelestrakError('Group name is required.');
+
+  const cacheKey = `group:${g.toLowerCase()}`;
+  if (!opts.force) {
+    const cached = getCachedGP(cacheKey);
+    if (Array.isArray(cached) && cached.length > 0) return cached;
+  }
+
+  const { controller, timeoutId } = makeController(15000, opts.signal);
+  let response;
+  try {
+    response = await fetch(`${CELESTRAK_BASE}?GROUP=${encodeURIComponent(g)}&FORMAT=JSON`, {
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err && err.name === 'AbortError') {
+      throw new CelestrakError('Request timed out — check your internet connection.', { cause: err });
+    }
+    throw new CelestrakError(`Network error: ${err && err.message ? err.message : err}`, { cause: err });
+  }
+  clearTimeout(timeoutId);
+
+  if (!response.ok) {
+    throw new CelestrakError(celestrakStatusMessage(response.status, g), { status: response.status });
+  }
+
+  const text = (await response.text()).trim();
+  if (!text || text.startsWith('No GP') || text === '[]') {
+    throw new CelestrakError(`No GP data found for group "${g}".`, { status: 404 });
+  }
+
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (err) {
+    throw new CelestrakError('Invalid JSON response from CelesTrak.', { cause: err });
+  }
+
+  const arr = Array.isArray(data) ? data : [data];
+  const records = arr.filter((o) => o && typeof o === 'object' && o.NORAD_CAT_ID != null);
+  if (records.length === 0) {
+    throw new CelestrakError(`No GP data found for group "${g}".`, { status: 404 });
+  }
+
+  setCachedGP(cacheKey, records);
+  return records;
+}
+
+/**
  * Fetch the latest TLE for a satellite from CelesTrak.
  *
  * Backward-compatible shim: fetches OMM (future-proof) and converts it to the

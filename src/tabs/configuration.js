@@ -24,8 +24,47 @@ import {
   deleteGroup,
 } from '../core/api.js';
 import { getGroupLabel, getSortedGroups } from '../core/groups.js';
-import { checkConnection, fetchLatestTLE, searchSatellitesByName, searchSatellitesByNorad } from '../tle-fetch.js';
+import { checkConnection, fetchLatestTLE, searchSatellitesByName, searchSatellitesByNorad, fetchGPGroup } from '../tle-fetch.js';
+import { ommToSatellitePayload } from '../gp.js';
 import { separationVectorToTLE, classicalElementsToTLE } from '../separation-vector.js';
+
+/**
+ * Curated CelesTrak GROUP query values for the bulk-import panel. Values are
+ * the group names accepted by `gp.php?GROUP=...`. Large groups are labelled.
+ */
+const CELESTRAK_GROUPS = [
+  { value: 'stations', label: 'Space Stations' },
+  { value: 'visual', label: 'Brightest (Visual)' },
+  { value: 'weather', label: 'Weather' },
+  { value: 'noaa', label: 'NOAA' },
+  { value: 'goes', label: 'GOES' },
+  { value: 'resource', label: 'Earth Resources' },
+  { value: 'sarsat', label: 'Search & Rescue (SARSAT)' },
+  { value: 'gps-ops', label: 'GPS Operational' },
+  { value: 'glo-ops', label: 'GLONASS Operational' },
+  { value: 'galileo', label: 'Galileo' },
+  { value: 'beidou', label: 'Beidou' },
+  { value: 'science', label: 'Space & Earth Science' },
+  { value: 'geodetic', label: 'Geodetic' },
+  { value: 'engineering', label: 'Engineering' },
+  { value: 'cubesat', label: 'CubeSats' },
+  { value: 'amateur', label: 'Amateur Radio' },
+  { value: 'intelsat', label: 'Intelsat' },
+  { value: 'iridium-NEXT', label: 'Iridium NEXT' },
+  { value: 'orbcomm', label: 'Orbcomm' },
+  { value: 'globalstar', label: 'Globalstar' },
+  { value: 'oneweb', label: 'OneWeb (large)' },
+  { value: 'starlink', label: 'Starlink (large)' },
+  { value: 'geo', label: 'GEO (large)' },
+  { value: 'active', label: 'All Active (very large)' },
+];
+
+/** Color palette cycled through for bulk-imported satellites. */
+const SAT_IMPORT_COLORS = [
+  '#7dd3fc', '#fbbf24', '#fb7185', '#34d399', '#a78bfa',
+  '#f97316', '#38bdf8', '#f472b6', '#4ade80', '#c084fc',
+  '#fb923c', '#22d3ee', '#e879f9', '#a3e635', '#fca5a5',
+];
 
 export function initConfiguration() {
   const section = document.getElementById('tab-configuration');
@@ -126,6 +165,7 @@ export function initConfiguration() {
     if (satSearchInput) satSearchInput.value = '';
     if (satSearchStatus) satSearchStatus.style.display = 'none';
     hideSearchResults();
+    hideImportForm();
     showSatelliteForm();
   });
 
@@ -177,6 +217,206 @@ export function initConfiguration() {
   if (satSearchInput) {
     satSearchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); performSatelliteSearch(); }
+    });
+  }
+
+  // ─── Bulk import from a CelesTrak GROUP ───
+
+  const satImportBtn = document.getElementById('cfgSatImportBtn');
+  const satImportForm = document.getElementById('cfgSatImportForm');
+  const importGroupSel = document.getElementById('cfgImportGroupSel');
+  const importTargetGroup = document.getElementById('cfgImportTargetGroup');
+  const importFetchBtn = document.getElementById('cfgImportFetchBtn');
+  const importCancelBtn = document.getElementById('cfgImportCancelBtn');
+  const importStatus = document.getElementById('cfgImportStatus');
+  const importControls = document.getElementById('cfgImportControls');
+  const importSelectAll = document.getElementById('cfgImportSelectAll');
+  const importCount = document.getElementById('cfgImportCount');
+  const importAddBtn = document.getElementById('cfgImportAddBtn');
+  const importResults = document.getElementById('cfgImportResults');
+
+  /** @type {Array<Record<string, unknown>>} last fetched OMM records for preview */
+  let importRecords = [];
+  let importBusy = false;
+  const IMPORT_PREVIEW_CAP = 500;
+
+  function renderImportGroupOptions() {
+    if (!importGroupSel) return;
+    importGroupSel.innerHTML = CELESTRAK_GROUPS
+      .map((g) => `<option value="${escapeHtmlAttr(g.value)}">${escapeHtml(g.label)}</option>`)
+      .join('');
+  }
+
+  function renderImportTargetGroup() {
+    if (!importTargetGroup) return;
+    const groups = getSortedGroups();
+    const prev = importTargetGroup.value;
+    importTargetGroup.innerHTML = groups.length
+      ? groups.map((g) => `<option value="${escapeHtmlAttr(g.name)}">${escapeHtml(g.label)}</option>`).join('')
+      : '<option value="">(no groups)</option>';
+    if (prev && groups.some((g) => g.name === prev)) importTargetGroup.value = prev;
+  }
+
+  function showImportStatus(msg, type = 'info') {
+    if (!importStatus) return;
+    importStatus.textContent = msg || '';
+    importStatus.className = `cfg-search-status cfg-search-status-${type}`;
+    importStatus.style.display = msg ? '' : 'none';
+  }
+
+  function hideImportForm() {
+    if (satImportForm) satImportForm.style.display = 'none';
+  }
+
+  function updateImportCount() {
+    if (!importCount || !importResults) return;
+    const boxes = importResults.querySelectorAll('.cfg-import-cb');
+    const checked = importResults.querySelectorAll('.cfg-import-cb:checked');
+    importCount.textContent = `${checked.length} selected · ${boxes.length} shown`;
+  }
+
+  function renderImportPreview(records) {
+    if (!importResults) return;
+    const existingNorads = new Set(
+      Object.values(getState().satellites || {})
+        .map((s) => Number(s?.noradId))
+        .filter((n) => Number.isFinite(n)),
+    );
+    const shown = records.slice(0, IMPORT_PREVIEW_CAP);
+    const rows = shown.map((omm) => {
+      const norad = Number(omm.NORAD_CAT_ID);
+      const name = escapeHtml(String(omm.OBJECT_NAME || `NORAD ${norad}`));
+      const exists = existingNorads.has(norad);
+      const epoch = escapeHtml(String(omm.EPOCH || '').slice(0, 19));
+      return `<label class="cfg-search-item" style="display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" class="cfg-import-cb" value="${norad}" ${exists ? 'disabled' : 'checked'}>
+        <span class="cfg-search-item-name">${name}${exists ? ' <span class="cfg-tbl-dim">(already added)</span>' : ''}</span>
+        <span class="cfg-search-item-meta"><span>NORAD: ${norad}</span><span>${epoch}</span></span>
+      </label>`;
+    }).join('');
+    const truncNote = records.length > IMPORT_PREVIEW_CAP
+      ? `<div class="cfg-search-more">Showing first ${IMPORT_PREVIEW_CAP} of ${records.length}. Import a smaller group to see all.</div>`
+      : '';
+    importResults.innerHTML = rows + truncNote;
+    importResults.style.display = '';
+    if (importControls) importControls.style.display = 'flex';
+    if (importSelectAll) importSelectAll.checked = true;
+    updateImportCount();
+  }
+
+  if (satImportBtn) {
+    satImportBtn.addEventListener('click', () => {
+      hideSatelliteForm();
+      renderImportGroupOptions();
+      renderImportTargetGroup();
+      importRecords = [];
+      if (importResults) { importResults.style.display = 'none'; importResults.innerHTML = ''; }
+      if (importControls) importControls.style.display = 'none';
+      showImportStatus('');
+      if (satImportForm) satImportForm.style.display = '';
+    });
+  }
+
+  if (importCancelBtn) importCancelBtn.addEventListener('click', hideImportForm);
+
+  if (importFetchBtn) {
+    importFetchBtn.addEventListener('click', async () => {
+      if (importBusy) return;
+      const group = importGroupSel?.value || '';
+      if (!group) { showImportStatus('Select a group.', 'warn'); return; }
+      importBusy = true;
+      importFetchBtn.disabled = true;
+      const origText = importFetchBtn.textContent;
+      importFetchBtn.textContent = 'Fetching…';
+      showImportStatus(`Fetching group "${group}" from CelesTrak…`, 'info');
+      if (importControls) importControls.style.display = 'none';
+      if (importResults) { importResults.style.display = 'none'; importResults.innerHTML = ''; }
+      try {
+        const records = await fetchGPGroup(group);
+        importRecords = records;
+        renderImportPreview(records);
+        showImportStatus(`${records.length} satellite${records.length === 1 ? '' : 's'} in "${group}". Select and click Add Selected.`, 'success');
+      } catch (err) {
+        importRecords = [];
+        showImportStatus(err instanceof Error ? err.message : 'Failed to fetch group.', 'error');
+      } finally {
+        importBusy = false;
+        importFetchBtn.disabled = false;
+        importFetchBtn.textContent = origText;
+      }
+    });
+  }
+
+  if (importSelectAll) {
+    importSelectAll.addEventListener('change', () => {
+      if (!importResults) return;
+      importResults.querySelectorAll('.cfg-import-cb:not(:disabled)').forEach((cb) => {
+        cb.checked = importSelectAll.checked;
+      });
+      updateImportCount();
+    });
+  }
+
+  if (importResults) {
+    importResults.addEventListener('change', (e) => {
+      if (e.target instanceof HTMLInputElement && e.target.classList.contains('cfg-import-cb')) {
+        updateImportCount();
+      }
+    });
+  }
+
+  if (importAddBtn) {
+    importAddBtn.addEventListener('click', async () => {
+      if (importBusy || !importResults) return;
+      const checkedNorads = new Set(
+        Array.from(importResults.querySelectorAll('.cfg-import-cb:checked')).map((cb) => Number(cb.value)),
+      );
+      if (checkedNorads.size === 0) { showImportStatus('No satellites selected.', 'warn'); return; }
+      const targetGroup = importTargetGroup?.value || 'custom';
+
+      const existingIds = new Set(Object.keys(getState().satellites || {}));
+      const existingNorads = new Set(
+        Object.values(getState().satellites || {}).map((s) => Number(s?.noradId)).filter((n) => Number.isFinite(n)),
+      );
+
+      importBusy = true;
+      importAddBtn.disabled = true;
+      const origText = importAddBtn.textContent;
+      importAddBtn.textContent = 'Adding…';
+
+      let added = 0; let skipped = 0; let failed = 0; let colorIdx = 0;
+      for (const omm of importRecords) {
+        const norad = Number(omm.NORAD_CAT_ID);
+        if (!checkedNorads.has(norad)) continue;
+        if (existingNorads.has(norad)) { skipped += 1; continue; }
+        try {
+          const color = SAT_IMPORT_COLORS[colorIdx % SAT_IMPORT_COLORS.length];
+          colorIdx += 1;
+          const payload = ommToSatellitePayload(omm, { groupName: targetGroup, color });
+          let id = payload.id; let n = 2;
+          while (existingIds.has(id)) { id = `${payload.id}_${n}`; n += 1; }
+          payload.id = id;
+          await createSatellite(payload);
+          existingIds.add(id);
+          existingNorads.add(norad);
+          added += 1;
+          if (added % 10 === 0) showImportStatus(`Adding… ${added} added`, 'info');
+        } catch (err) {
+          failed += 1;
+          if (err && err.isRateLimited) { showImportStatus('Rate-limited by CelesTrak — stopped.', 'error'); break; }
+        }
+      }
+
+      try { await refreshAll(); } catch { /* ignore */ }
+
+      importBusy = false;
+      importAddBtn.disabled = false;
+      importAddBtn.textContent = origText;
+      showImportStatus(
+        `Added ${added}${skipped ? `, skipped ${skipped} (already present)` : ''}${failed ? `, failed ${failed}` : ''}.`,
+        added > 0 ? 'success' : 'warn',
+      );
+      renderImportPreview(importRecords); // re-render so newly-added rows show as disabled
     });
   }
 
@@ -1048,6 +1288,7 @@ export function initConfiguration() {
   subscribe('groups', () => {
     renderGroupList();
     renderSatGroupDropdown();
+    renderImportTargetGroup();
     renderSatelliteList();
   });
 

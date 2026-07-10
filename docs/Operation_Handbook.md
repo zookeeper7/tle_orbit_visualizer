@@ -464,6 +464,22 @@ npm run server     # 백엔드 유지
 
 > **임의 위성 등록 워크플로 요약**: A·C·D는 폼만 자동으로 채워주는 보조 도구입니다. 어느 경로든 마지막에 **Save**를 눌러야 DB에 등록됩니다.
 
+#### CelesTrak Group 대량 임포트 (+ Import Group)
+
+한 번의 요청으로 CelesTrak 그룹 전체를 받아 원하는 위성만 골라 일괄 등록합니다. 개별 조회보다 효율적이고 CelesTrak이 권장하는 방식입니다.
+
+1. **+ Import Group** 클릭 → 임포트 패널 열림
+2. **CelesTrak Group** 선택 (Space Stations, GPS Operational, Galileo, Weather, NOAA, Science, Amateur, Starlink, GEO, Active 등 24종)
+3. **Assign to Group** — 등록될 앱 그룹 지정
+4. **Fetch & Preview** → `gp.php?GROUP=…&FORMAT=JSON`으로 그룹 전체 OMM 수신 → 위성 목록(체크박스)
+   - 이미 등록된 위성(NORAD 기준)은 **"already added"** 로 표시·비활성
+   - 대형 그룹(Active/Starlink/GEO 등)은 미리보기 최대 500개로 제한
+5. **Select all** 또는 개별 선택 → **Add Selected**
+   - 각 OMM → 레거시 TLE 변환 후 일괄 등록 (색상 자동 배정, 중복 NORAD skip, 6자리 번호는 Alpha-5)
+   - HTTP 403(레이트리밋) 시 중단
+
+> **주의**: 모든 조회는 NORAD 번호별 2시간 캐시를 거칩니다. Active/Starlink 같은 대형 그룹은 CelesTrak이 가장 강하게 제한하므로 필요한 그룹만 받으세요.
+
 #### Fetch All TLEs
 
 NORAD ID가 있는 모든 활성 위성의 GP 데이터를 CelesTrak에서 OMM(JSON)으로 일괄 조회 → TLE 변환 후 갱신합니다. **HTTP 403(레이트리밋)** 발생 시 즉시 중단하고 몇 개까지 갱신됐는지 안내합니다.
@@ -725,6 +741,7 @@ TLE(Two-Line Element Set)는 인공위성의 궤도를 기술하는 표준 형�
 | 소스 | 설명 | 사용 방법 |
 |---|---|---|
 | **CelesTrak (NORAD)** | 미군 Space-Track 기반 공개 GP 데이터 (OMM/JSON 수신 → TLE 변환) | Fetch Latest TLE / Fetch All TLEs / Auto Refresh |
+| **CelesTrak Group 대량** | CelesTrak 그룹 전체를 OMM으로 수신 → 선택 위성 일괄 등록 | Configuration → Satellite Management → + Import Group |
 | **기관 자체 TLE** | 운영기관의 자체 궤도결정 결과 | Configuration에서 수동 입력 |
 | **임의 TLE (분리 벡터)** | 발사 직후 상태벡터로부터 생성 | Configuration → Add Satellite → Separation Vector 폼 |
 | **임의 TLE (6 요소)** | 6 고전 궤도요소로부터 생성 | Configuration → Add Satellite → Classical Orbital Elements 폼 |

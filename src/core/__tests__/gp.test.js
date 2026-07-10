@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { twoline2satrec, json2satrec, propagate } from 'satellite.js';
-import { alpha5Encode, alpha5Decode, isTleRepresentable, ommToTLE, CelestrakError } from '../../gp.js';
+import { alpha5Encode, alpha5Decode, isTleRepresentable, ommToTLE, CelestrakError, makeSatelliteId, ommToSatellitePayload } from '../../gp.js';
 
 // A real CelesTrak OMM record (gp.php?CATNR=25544&FORMAT=JSON) captured for ISS.
 const ISS_OMM = {
@@ -166,6 +166,52 @@ describe('ommToTLE — Alpha-5 6-digit catalog numbers propagate', () => {
 
   it('throws for catalog numbers a TLE cannot represent', () => {
     expect(() => ommToTLE({ ...ISS_OMM, NORAD_CAT_ID: 799500000 })).toThrow(/exceeds the Alpha-5 range/);
+  });
+});
+
+describe('makeSatelliteId', () => {
+  it('slugifies name + catalog number', () => {
+    expect(makeSatelliteId('ISS (ZARYA)', 25544)).toBe('iss_zarya_25544');
+    expect(makeSatelliteId('NOAA 19', 33591)).toBe('noaa_19_33591');
+    expect(makeSatelliteId('COSMOS 2251 DEB', 34456)).toBe('cosmos_2251_deb_34456');
+  });
+
+  it('falls back to norad_<id> for empty/garbage names', () => {
+    expect(makeSatelliteId('', 12345)).toBe('norad_12345');
+    expect(makeSatelliteId('!!!', 12345)).toBe('norad_12345');
+  });
+});
+
+describe('ommToSatellitePayload', () => {
+  it('builds a valid createSatellite payload from an OMM', () => {
+    const p = ommToSatellitePayload(ISS_OMM);
+    expect(p.id).toBe('iss_zarya_25544');
+    expect(p.name).toBe('ISS (ZARYA)');
+    expect(p.noradId).toBe(25544);
+    expect(p.groupName).toBe('custom'); // default
+    expect(p.enabled).toBe(true);
+    expect(p.tleLine1).toHaveLength(69);
+    expect(p.tleLine2).toHaveLength(69);
+    expect(p.tleLine1.substring(2, 7)).toBe('25544');
+  });
+
+  it('applies opts (id / groupName / color / enabled)', () => {
+    const p = ommToSatellitePayload(ISS_OMM, { id: 'custom_id', groupName: 'general', color: '#ff0000', enabled: false });
+    expect(p.id).toBe('custom_id');
+    expect(p.groupName).toBe('general');
+    expect(p.color).toBe('#ff0000');
+    expect(p.enabled).toBe(false);
+  });
+
+  it('supports 6-digit catalog numbers via Alpha-5', () => {
+    const p = ommToSatellitePayload({ ...ISS_OMM, NORAD_CAT_ID: 148493, OBJECT_NAME: 'FUTURE SAT' });
+    expect(p.noradId).toBe(148493);
+    expect(p.tleLine1.substring(2, 7)).toBe('E8493');
+    expect(p.id).toBe('future_sat_148493');
+  });
+
+  it('throws for catalog numbers a TLE cannot represent', () => {
+    expect(() => ommToSatellitePayload({ ...ISS_OMM, NORAD_CAT_ID: 799500000 })).toThrow(/exceeds the Alpha-5 range/);
   });
 });
 

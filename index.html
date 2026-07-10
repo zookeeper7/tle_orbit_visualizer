@@ -468,8 +468,41 @@
             <h3>Satellite Management</h3>
             <div class="cfg-section-actions">
               <button id="cfgSatAddBtn" class="cfg-btn cfg-btn-accent" type="button">+ Add Satellite</button>
+              <button id="cfgSatImportBtn" class="cfg-btn cfg-btn-accent" type="button">+ Import Group</button>
               <button id="cfgSatFetchAllBtn" class="cfg-btn cfg-btn-green" type="button">Fetch All TLEs</button>
             </div>
+          </div>
+
+          <!-- Bulk import from a CelesTrak GROUP (hidden by default) -->
+          <div id="cfgSatImportForm" class="cfg-form" style="display:none;">
+            <div class="cfg-form-title">Import from CelesTrak Group</div>
+            <div class="cfg-search-hint" style="margin-bottom:8px;">
+              Fetch a whole CelesTrak group at once (OMM/JSON), preview it, and add the satellites you want.
+              Large groups (Active, Starlink, GEO…) return thousands of objects — the preview is capped and CelesTrak may rate-limit.
+            </div>
+            <div class="cfg-form-grid">
+              <label>
+                <span>CelesTrak Group</span>
+                <select id="cfgImportGroupSel" class="cfg-input"></select>
+              </label>
+              <label>
+                <span>Assign to Group</span>
+                <select id="cfgImportTargetGroup" class="cfg-input"></select>
+              </label>
+            </div>
+            <div class="cfg-search-bar" style="margin-top:8px;">
+              <button id="cfgImportFetchBtn" class="cfg-btn cfg-btn-accent" type="button">Fetch &amp; Preview</button>
+              <button id="cfgImportCancelBtn" class="cfg-btn" type="button">Close</button>
+            </div>
+            <div id="cfgImportStatus" class="cfg-search-status" style="display:none;"></div>
+            <div id="cfgImportControls" style="display:none; align-items:center; gap:12px; margin:8px 0; flex-wrap:wrap;">
+              <label style="display:inline-flex; align-items:center; gap:6px;">
+                <input type="checkbox" id="cfgImportSelectAll" checked> Select all
+              </label>
+              <span id="cfgImportCount" class="cfg-tbl-dim"></span>
+              <button id="cfgImportAddBtn" class="cfg-btn cfg-btn-green" type="button">Add Selected</button>
+            </div>
+            <div id="cfgImportResults" class="cfg-search-results" style="display:none;"></div>
           </div>
 
           <!-- Add/Edit form (hidden by default) -->

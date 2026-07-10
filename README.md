@@ -27,6 +27,7 @@ Multi-satellite 3D/2D orbit visualization, automatic pass-schedule computation a
 
 ### TLE Sources & Generators
 - **CelesTrak / NORAD Fetch** — One-shot or batch fetch for any satellite with a NORAD ID via the CelesTrak GP API in **OMM (JSON)** format — future-proof now that CelesTrak is retiring the fixed-width TLE format for 6+ digit catalog numbers. Each OMM is converted on the fly to a legacy TLE (with **Alpha-5** encoding for catalog numbers up to 339999), so the whole SGP4 pipeline stays unchanged. Optional **Auto Refresh** at 30 min / 1 h / 2 h / 6 h intervals; a **2-hour client cache** honours CelesTrak's update cadence and batch fetches **stop automatically on an HTTP 403 rate-limit** so you never get firewalled
+- **CelesTrak Group Import** — Bulk-add an entire CelesTrak group (Space Stations, GPS, Galileo, Weather, Starlink, …) in one request: fetch → preview (with already-added detection) → add the satellites you select. This is the batch method CelesTrak recommends over harvesting individual objects
 - **TLE from Separation Vector** — Convert a launch separation state (WGS84 ECEF position + Earth-relative velocity at UTC) into an SGP4-compatible TLE
 - **TLE from Classical Orbital Elements** — Generate a TLE from the 6 Keplerian elements at a UTC epoch, with osculating → mean conversion verified by SGP4 round-trip
 - **Manual TLE** — Paste any 3-line TLE for satellites not in CelesTrak
@@ -35,7 +36,7 @@ Multi-satellite 3D/2D orbit visualization, automatic pass-schedule computation a
 - **Tab-Capture Recording** — Records the entire visible page (3D scene + side panels + playback bar) into a single WebM video file via `getDisplayMedia` + `MediaRecorder` at 24 / 30 / 60 fps. Captures smoothly at any playback speed up to 360×.
 
 ### Configuration
-- **Satellites** — CRUD with optional CelesTrak name/NORAD search, color picker, enable toggle, group classification
+- **Satellites** — CRUD with optional CelesTrak name/NORAD search, **bulk import from a CelesTrak group**, color picker, enable toggle, group classification
 - **Ground Stations** — CRUD with lat/lon/min-elevation
 - **Azimuth Mask** — Per-antenna terrain/building obstruction profiles (CSV import) with pass sub-splitting
 - **Antenna Management** — Hierarchical station → antenna → satellite mapping with free-text antenna types and primary/backup role assignment

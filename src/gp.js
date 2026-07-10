@@ -163,6 +163,49 @@ export function ommToTLE(omm) {
   };
 }
 
+/**
+ * Slugify a satellite name + catalog number into a stable, unique id
+ * (e.g. "ISS (ZARYA)" + 25544 → "iss_zarya_25544"). Used by bulk import.
+ * @param {string} name
+ * @param {number|string} noradId
+ * @returns {string}
+ */
+export function makeSatelliteId(name, noradId) {
+  const base = String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+  return base ? `${base}_${noradId}` : `norad_${noradId}`;
+}
+
+/**
+ * Convert a CelesTrak OMM record into a createSatellite() payload, using
+ * ommToTLE() for the legacy TLE lines. Throws (CelestrakError) when the catalog
+ * number is not TLE-representable, so bulk importers can skip that record.
+ *
+ * @param {Record<string, unknown>} omm
+ * @param {{ id?: string, groupName?: string, color?: string, enabled?: boolean }} [opts]
+ * @returns {{ id:string, name:string, noradId:number|null, groupName:string,
+ *   tleLine0:string, tleLine1:string, tleLine2:string, color:string, enabled:boolean }}
+ */
+export function ommToSatellitePayload(omm, opts = {}) {
+  const tle = ommToTLE(omm);
+  const noradId = Number(omm && omm.NORAD_CAT_ID);
+  const name = (String((omm && omm.OBJECT_NAME) || '').trim()) || `NORAD ${noradId}`;
+  return {
+    id: opts.id || makeSatelliteId(name, noradId),
+    name,
+    noradId: Number.isFinite(noradId) ? noradId : null,
+    groupName: opts.groupName || 'custom',
+    tleLine0: tle.line0 || name,
+    tleLine1: tle.line1,
+    tleLine2: tle.line2,
+    color: opts.color || '#7dd3fc',
+    enabled: opts.enabled !== false,
+  };
+}
+
 // ── formatting helpers ──────────────────────────────────────────────────────
 
 function numOr0(v) {
